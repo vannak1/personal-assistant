@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Dict, List, Literal, Optional, Sequence, Any
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
@@ -53,8 +53,19 @@ class State(InputState):
     It is set to 'True' when the step count reaches recursion_limit - 1.
     """
 
-    # Additional attributes can be added here as needed.
-    # Common examples include:
-    # retrieved_documents: List[Document] = field(default_factory=list)
-    # extracted_entities: Dict[str, Any] = field(default_factory=dict)
-    # api_connections: Dict[str, Any] = field(default_factory=dict)
+    next: Optional[str] = field(default=None)
+    """
+    Indicates the next node to route to in the hierarchical agent system.
+    Used by the supervisor agent to route requests to specialized agents.
+    """
+
+    active_agent: Optional[str] = field(default=None)
+    """
+    Tracks which specialized agent is currently handling the request.
+    """
+
+    feature_requests: List[Dict[str, Any]] = field(default_factory=list)
+    """
+    Stores documented feature requests that have been processed by the Feature Request agent.
+    Each feature request is a dictionary with details about the request.
+    """

@@ -23,8 +23,32 @@ class Configuration:
         },
     )
 
+    supervisor_prompt: str = field(
+        default=prompts.SUPERVISOR_PROMPT,
+        metadata={
+            "description": "The system prompt for the supervisor agent that routes requests. "
+            "This prompt determines how requests are routed to specialized agents."
+        },
+    )
+
+    feature_request_prompt: str = field(
+        default=prompts.FEATURE_REQUEST_PROMPT,
+        metadata={
+            "description": "The system prompt for the feature request agent. "
+            "This agent identifies and documents feature requests."
+        },
+    )
+
+    deep_research_prompt: str = field(
+        default=prompts.DEEP_RESEARCH_PROMPT,
+        metadata={
+            "description": "The system prompt for the deep research agent. "
+            "This agent provides thorough research on complex topics."
+        },
+    )
+
     model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
-        default="anthropic/claude-3-5-sonnet-20240620",
+        default="openai/gpt-4o-mini",
         metadata={
             "description": "The name of the language model to use for the agent's main interactions. "
             "Should be in the form: provider/model-name."
@@ -35,6 +59,13 @@ class Configuration:
         default=10,
         metadata={
             "description": "The maximum number of search results to return for each search query."
+        },
+    )
+
+    feature_requests_queue: list = field(
+        default_factory=list,
+        metadata={
+            "description": "Queue of feature requests that have been documented and are ready for development."
         },
     )
 
