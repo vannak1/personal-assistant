@@ -23,18 +23,26 @@ class Configuration:
         },
     )
 
-    supervisor_prompt: str = field(
-        default=prompts.SUPERVISOR_PROMPT,
+    personal_assistant_prompt: str = field(
+        default=prompts.PERSONAL_ASSISTANT_PROMPT,
         metadata={
-            "description": "The system prompt for the supervisor agent that routes requests. "
-            "This prompt determines how requests are routed to specialized agents."
+            "description": "The system prompt for the main Personal Assistant agent. "
+            "This agent handles user interaction, rapport building, and routing."
         },
     )
+
+    # supervisor_prompt: str = field(
+    #     default=prompts.SUPERVISOR_PROMPT,
+    #     metadata={
+    #         "description": "[DEPRECATED] The system prompt for the supervisor agent that routes requests. "
+    #         "This prompt determines how requests are routed to specialized agents."
+    #     },
+    # )
 
     feature_request_prompt: str = field(
         default=prompts.FEATURE_REQUEST_PROMPT,
         metadata={
-            "description": "The system prompt for the feature request agent. "
+            "description": "The system prompt for the feature request agent (Execution Enforcer). "
             "This agent identifies and documents feature requests."
         },
     )
