@@ -181,7 +181,7 @@ async def personal_assistant_agent(state: State) -> Dict:
 
     # --- Decision Logic (Handle Directly or Route) --- 
     system_message = configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())
-    decision_prompt = f\"User ({current_user_name}) request: '{user_request_message.content}'.\n\nAssess this request and our conversation history to determine if we have sufficient clarity and details to proceed:\n\n1. GATHER_MORE_INFO: If the request is ambiguous, lacks specific details, or needs clarification on goals, constraints, timelines, or examples.\n\n2. HANDLE_DIRECTLY: If it's a well-defined simple request, greeting, or question you can answer with the details provided. You can use tools if needed.\n\n3. ROUTE_EXECUTION: If it's a well-defined request involving planning, feature requests, or turning ideas into actions, AND you have all necessary details about goals, constraints, and expectations.\n\n4. ROUTE_RESEARCH: If it's a well-defined request requiring in-depth information, complex explanations, or research, AND you have clear understanding of what specific information is needed.\n\nRespond ONLY with 'GATHER_MORE_INFO', 'HANDLE_DIRECTLY', 'ROUTE_EXECUTION', or 'ROUTE_RESEARCH'. Do not add any other text.\"
+    decision_prompt = f\"User ({current_user_name}) request: '{user_request_message.content}'.\n\nAssess this request and our conversation history to determine what approach to take:\n\n1. GATHER_MORE_INFO: If you need more details about goals, constraints, preferences, or examples before proceeding.\n\n2. HANDLE_DIRECTLY: If it's a straightforward request you can handle with available information.\n\n3. DISCUSS_EXECUTION_APPROACH: If it involves planning or feature development that would benefit from specialist help, but you should first discuss the approach with the user.\n\n4. DISCUSS_RESEARCH_APPROACH: If it requires in-depth research that would benefit from specialist help, but you should first discuss the approach with the user.\n\nRespond ONLY with 'GATHER_MORE_INFO', 'HANDLE_DIRECTLY', 'DISCUSS_EXECUTION_APPROACH', or 'DISCUSS_RESEARCH_APPROACH'. Do not add any other text.\"
     
     decision_model = load_chat_model(configuration.model)
     # Provide relevant history for decision
@@ -194,19 +194,65 @@ async def personal_assistant_agent(state: State) -> Dict:
     decision = decision_response.content.strip()
     print(f"PA Decision: {decision}")
 
+    # Get the number of messages from this user to determine conversation stage
+    user_message_count = sum(1 for msg in state.messages if isinstance(msg, HumanMessage))
+    first_interaction = user_message_count <= 2  # First or second message from user
+
     if "GATHER_MORE_INFO" in decision:
         print("PA: Need to gather more information.")
-        # Create a prompt specifically for asking clarifying questions
-        clarity_prompt = f\"System time: {datetime.now(tz=UTC).isoformat()}\nUser name: {current_user_name}\n\nThe user's request requires more clarity. Ask targeted questions to gather essential details about:\n1. Specific goals/outcomes they want to achieve\n2. Any constraints or requirements they have\n3. Timeline expectations\n4. Examples or references that would help clarify\n5. Any other contextual information needed to fully understand their request\n\nKeep your questions brief, specific, and focused on getting actionable information.\"
+        # Create a prompt specifically for asking clarifying questions in a conversational way
+        clarity_prompt = f\"System time: {datetime.now(tz=UTC).isoformat()}\nUser name: {current_user_name}\n\nThe user's request requires more clarity. In a friendly, conversational tone, ask specific questions to better understand their needs. Focus on one question at a time. If this is one of your first interactions, start with a warm greeting. Ask about:\n1. What they're hoping to accomplish\n2. Any preferences or requirements they have\n3. How urgent this is for them\n4. Any similar experiences they've had before\n\nMake the conversation feel natural and supportive, not like an interrogation.\"
         
         response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + clarity_prompt}, *state.messages]))
         response.name = "PersonalAssistant"
         return {"messages": [response], "active_agent": None, "next": "__end__"}
         
-    elif "ROUTE_EXECUTION" in decision:
-        print("PA: Routing to Execution Enforcer.")
-        # Prepare comprehensive context for the specialist
-        execution_context = f"""
+    elif "DISCUSS_EXECUTION_APPROACH" in decision:
+        print("PA: Discussing execution approach before routing.")
+        
+        # Create a prompt for discussing the approach and confirming with user
+        discussion_prompt = f\"System time: {datetime.now(tz=UTC).isoformat()}\nUser name: {current_user_name}\n\nBefore handing off to a specialist, discuss your approach with the user in a friendly tone:\n\n1. Acknowledge their request about '{user_request_message.content[:50]}...'\n2. Explain that their request involves planning or implementation that would benefit from specialist expertise\n3. Briefly share how you think a plan should be developed\n4. Ask if that approach sounds good to them\n5. Explicitly mention that you'll hand off to a specialist once they confirm\n\nUse language like 'I can connect you with our planning specialist who can create a detailed implementation plan for this. Does that sound helpful?'\"
+        
+        response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + discussion_prompt}, *state.messages]))
+        response.name = "PersonalAssistant"
+        
+        # Set a state flag to indicate we're waiting for confirmation
+        response.additional_kwargs = {"awaiting_execution_confirmation": True}
+        return {"messages": [response], "active_agent": None, "next": "__end__"}
+        
+    elif "DISCUSS_RESEARCH_APPROACH" in decision:
+        print("PA: Discussing research approach before routing.")
+        
+        # Create a prompt for discussing the approach and confirming with user
+        discussion_prompt = f\"System time: {datetime.now(tz=UTC).isoformat()}\nUser name: {current_user_name}\n\nBefore handing off to a specialist, discuss your approach with the user in a friendly tone:\n\n1. Acknowledge their question about '{user_request_message.content[:50]}...'\n2. Explain that their question requires in-depth research that would benefit from specialist expertise\n3. Briefly share what key aspects you think should be researched\n4. Ask if that approach sounds good to them\n5. Explicitly mention that you'll hand off to a research specialist once they confirm\n\nUse language like 'I can connect you with our research specialist who can provide comprehensive information on this topic. Would that be helpful?'\"
+        
+        response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + discussion_prompt}, *state.messages]))
+        response.name = "PersonalAssistant"
+        
+        # Set a state flag to indicate we're waiting for confirmation
+        response.additional_kwargs = {"awaiting_research_confirmation": True}
+        return {"messages": [response], "active_agent": None, "next": "__end__"}
+        
+    # Check if user confirmed a specialist handoff (look for confirmation in the last message)
+    elif isinstance(last_message, HumanMessage):
+        # Check if the previous AI message was awaiting confirmation
+        previous_ai_messages = [msg for msg in reversed(state.messages[:-1]) if isinstance(msg, AIMessage)]
+        if previous_ai_messages and previous_ai_messages[0].additional_kwargs:
+            if previous_ai_messages[0].additional_kwargs.get("awaiting_execution_confirmation"):
+                # Check if user's response indicates agreement
+                confirmation_prompt = f\"Does the message '{last_message.content}' indicate that the user AGREES to have their request handled by a specialist for execution planning? Respond with only YES or NO.\"
+                confirmation_response = await decision_model.ainvoke([
+                    {\"role\": \"system\", \"content\": \"You analyze messages to determine if they indicate agreement or disagreement.\"},
+                    {\"role\": \"user\", \"content\": confirmation_prompt}
+                ])
+                if "YES" in confirmation_response.content.upper():
+                    print("PA: User confirmed execution specialist. Routing to Execution Enforcer.")
+                    # Send a handoff message first
+                    handoff_message = f"Thanks for confirming, {current_user_name}! I'll connect you with our planning specialist now who will create a detailed implementation plan for you. They'll have all the context from our conversation."
+                    state.messages.append(AIMessage(content=handoff_message, name="PersonalAssistant"))
+                    
+                    # Prepare comprehensive context for the specialist
+                    execution_context = f"""
 User: {current_user_name}
 Request: {user_request_message.content}
 
@@ -217,17 +263,29 @@ Based on our conversation, we have gathered these key details:
 - This appears to be a well-defined task requiring execution planning
 - Please create a detailed, actionable plan addressing all aspects of the request
 """
-        # Add execution context as a system note (not visible to user)
-        state.messages.append(AIMessage(
-            content=execution_context, 
-            name="PersonalAssistant_ContextNote",
-            additional_kwargs={"is_context": True}
-        ))
-        return {"next": "execution_enforcer_agent", "active_agent": "execution_enforcer"}
-    elif "ROUTE_RESEARCH" in decision:
-        print("PA: Routing to Deep Research Agent.")
-        # Prepare comprehensive context for the specialist
-        research_context = f"""
+                    # Add execution context as a system note (not visible to user)
+                    state.messages.append(AIMessage(
+                        content=execution_context, 
+                        name="PersonalAssistant_ContextNote",
+                        additional_kwargs={"is_context": True}
+                    ))
+                    return {"next": "execution_enforcer_agent", "active_agent": "execution_enforcer"}
+                
+            elif previous_ai_messages[0].additional_kwargs.get("awaiting_research_confirmation"):
+                # Check if user's response indicates agreement
+                confirmation_prompt = f\"Does the message '{last_message.content}' indicate that the user AGREES to have their question handled by a research specialist? Respond with only YES or NO.\"
+                confirmation_response = await decision_model.ainvoke([
+                    {\"role\": \"system\", \"content\": \"You analyze messages to determine if they indicate agreement or disagreement.\"},
+                    {\"role\": \"user\", \"content\": confirmation_prompt}
+                ])
+                if "YES" in confirmation_response.content.upper():
+                    print("PA: User confirmed research specialist. Routing to Deep Research Agent.")
+                    # Send a handoff message first
+                    handoff_message = f"Great, {current_user_name}! I'll connect you with our research specialist now who will provide comprehensive information on this topic. They'll have all the context from our conversation."
+                    state.messages.append(AIMessage(content=handoff_message, name="PersonalAssistant"))
+                    
+                    # Prepare comprehensive context for the specialist
+                    research_context = f"""
 User: {current_user_name}
 Request: {user_request_message.content}
 
@@ -238,25 +296,26 @@ Based on our conversation, we have gathered these key details:
 - This appears to be a well-defined request requiring thorough research
 - Please provide comprehensive, accurate information addressing all aspects of the query
 """
-        # Add research context as a system note (not visible to user)
-        state.messages.append(AIMessage(
-            content=research_context, 
-            name="PersonalAssistant_ContextNote",
-            additional_kwargs={"is_context": True}
-        ))
-        return {"next": "deep_research_agent", "active_agent": "deep_research"}
-    else: # HANDLE_DIRECTLY
-        print("PA: Handling request directly.")
-        # Use user name in prompt if desired, or just proceed
-        direct_handling_prompt = f\"System time: {datetime.now(tz=UTC).isoformat()}\nUser name: {current_user_name}\" # Example context
-        response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + direct_handling_prompt}, *state.messages]))
-        response.name = "PersonalAssistant"
-        if not response.tool_calls:
-            print("PA: Finished handling directly.")
-            return {"messages": [response], "active_agent": None, "next": "__end__"}
-        else:
-            print("PA: Handling directly, needs tools.")
-            return {"messages": [response], "active_agent": "personal_assistant"} # PA handles its own tools
+                    # Add research context as a system note (not visible to user)
+                    state.messages.append(AIMessage(
+                        content=research_context, 
+                        name="PersonalAssistant_ContextNote",
+                        additional_kwargs={"is_context": True}
+                    ))
+                    return {"next": "deep_research_agent", "active_agent": "deep_research"}
+    
+    # If we reach here, either it's a direct handling case or the user didn't confirm specialist
+    print("PA: Handling request directly.")
+    # Use user name in prompt if desired, or just proceed
+    direct_handling_prompt = f\"System time: {datetime.now(tz=UTC).isoformat()}\nUser name: {current_user_name}\" # Example context
+    response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + direct_handling_prompt}, *state.messages]))
+    response.name = "PersonalAssistant"
+    if not response.tool_calls:
+        print("PA: Finished handling directly.")
+        return {"messages": [response], "active_agent": None, "next": "__end__"}
+    else:
+        print("PA: Handling directly, needs tools.")
+        return {"messages": [response], "active_agent": "personal_assistant"} # PA handles its own tools
 
 
 # Feature Request Agent Implementation (Execution Enforcer)
