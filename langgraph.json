@@ -1,7 +1,8 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "agent": "./src/react_agent/graph.py:graph"
+    "kaizen_assistant": "./src/react_agent/graph.py:graph"
   },
+  "config_store": "kaizen_assistant",
   "env": ".env"
 }
