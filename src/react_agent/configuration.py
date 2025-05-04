@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from typing import Annotated
+from typing import Annotated, Dict, Any
 
 from langchain_core.runnables import ensure_config
 from langgraph.config import get_config
@@ -13,63 +13,104 @@ from react_agent import prompts
 
 @dataclass(kw_only=True)
 class Configuration:
-    """The configuration for the agent."""
+    """The configuration for the multi-agent system."""
 
+    # System-wide settings
     system_prompt: str = field(
         default=prompts.SYSTEM_PROMPT,
         metadata={
-            "description": "The system prompt to use for the agent's interactions. "
-            "This prompt sets the context and behavior for the agent."
+            "description": "The system prompt for overall system context."
+        },
+    )
+    
+    # Agent-specific prompts
+    supervisor_prompt: str = field(
+        default=prompts.SUPERVISOR_PROMPT,
+        metadata={
+            "description": "The system prompt for the supervisor agent that routes requests."
         },
     )
 
     personal_assistant_prompt: str = field(
         default=prompts.PERSONAL_ASSISTANT_PROMPT,
         metadata={
-            "description": "The system prompt for the main Personal Assistant agent. "
-            "This agent handles user interaction, rapport building, and routing."
+            "description": "The system prompt for the personal assistant agent that handles user interaction."
         },
     )
-
-    # supervisor_prompt: str = field(
-    #     default=prompts.SUPERVISOR_PROMPT,
-    #     metadata={
-    #         "description": "[DEPRECATED] The system prompt for the supervisor agent that routes requests. "
-    #         "This prompt determines how requests are routed to specialized agents."
-    #     },
-    # )
 
     feature_request_prompt: str = field(
         default=prompts.FEATURE_REQUEST_PROMPT,
         metadata={
-            "description": "The system prompt for the feature request agent (Execution Enforcer). "
-            "This agent identifies and documents feature requests."
+            "description": "The system prompt for the execution enforcer agent."
         },
     )
 
     deep_research_prompt: str = field(
         default=prompts.DEEP_RESEARCH_PROMPT,
         metadata={
-            "description": "The system prompt for the deep research agent. "
-            "This agent provides thorough research on complex topics."
+            "description": "The system prompt for the deep research agent."
         },
     )
-
-    model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
-        default="openai/gpt-4o-mini",
+    
+    # Agent-specific models
+    supervisor_model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
+        default="deepseek/deepseek-v3",
         metadata={
-            "description": "The name of the language model to use for the agent's main interactions. "
-            "Should be in the form: provider/model-name."
+            "description": "The model used for the supervisor agent's routing decisions."
         },
     )
-
+    
+    personal_assistant_model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
+        default="openai/gpt-4o",
+        metadata={
+            "description": "The model used for the personal assistant agent's user interactions."
+        },
+    )
+    
+    execution_enforcer_model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
+        default="openai/gpt-4-turbo",
+        metadata={
+            "description": "The model used for the execution enforcer agent's planning capabilities."
+        },
+    )
+    
+    deep_research_model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
+        default="openai/gpt-4-turbo",
+        metadata={
+            "description": "The model used for the deep research agent's information gathering capabilities."
+        },
+    )
+    
+    # Model-specific parameters
+    supervisor_model_params: Dict[str, Any] = field(
+        default_factory=lambda: {"temperature": 0.2},  # Low temperature for more consistent routing
+        metadata={
+            "description": "Parameters for the supervisor model to optimize routing decisions."
+        },
+    )
+    
+    personal_assistant_model_params: Dict[str, Any] = field(
+        default_factory=lambda: {"temperature": 0.7, "max_tokens": 1024},  # Higher temperature for conversational variety
+        metadata={
+            "description": "Parameters for the personal assistant model to optimize conversational abilities."
+        },
+    )
+    
+    specialist_model_params: Dict[str, Any] = field(
+        default_factory=lambda: {"temperature": 0.2, "max_tokens": 2048},  # Lower temperature for analytical precision
+        metadata={
+            "description": "Parameters for the specialist models to optimize analytical capabilities."
+        },
+    )
+    
+    # Other configuration settings
     max_search_results: int = field(
         default=10,
         metadata={
             "description": "The maximum number of search results to return for each search query."
         },
     )
-
+    
     feature_requests_queue: list = field(
         default_factory=list,
         metadata={

@@ -70,6 +70,15 @@ To use OpenAI's chat models:
 OPENAI_API_KEY=your-api-key
 ```
 
+#### DeepSeek
+
+To use DeepSeek's models:
+
+1. Sign up for a [DeepSeek API key](https://platform.deepseek.com/).
+2. Once you have your API key, add it to your `.env` file:
+```
+DEEPSEEK_API_KEY=your-api-key
+```
 
 
 

@@ -85,3 +85,35 @@ class State(InputState):
     Stores the current status of the agent for UI display purposes.
     Possible values include: thinking, routing, gathering_more_info, etc.
     \"\"\"
+
+    # New fields for the supervisor-PA architecture
+    routing_reason: Optional[str] = field(default=None)
+    \"\"\"
+    Stores the reason why the supervisor routed to a specific agent.
+    Used to provide context for agents about why they were selected.
+    \"\"\"
+    
+    specialist_results: bool = field(default=False)
+    \"\"\"
+    Flag indicating if there are specialist results waiting to be presented.
+    Used by the PA agent to know when to present results.
+    \"\"\"
+    
+    first_message: bool = field(default=True)
+    \"\"\"
+    Flag indicating if this is the first message in the conversation.
+    Used for session initialization.
+    \"\"\"
+    
+    conversation_context: Dict[str, Any] = field(default_factory=dict)
+    \"\"\"
+    Stores additional conversation context that might be useful for agents.
+    Can include things like detected topics, user preferences, etc.
+    \"\"\"
+    
+    # Session management states
+    session_state: Optional[str] = field(default=None)
+    \"\"\"
+    Tracks the current state of the session management process.
+    Possible values: checking, waiting_for_name, etc.
+    \"\"\"
