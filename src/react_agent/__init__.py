@@ -1,9 +1,11 @@
 """React Agent.
 
 This module defines a custom reasoning and action agent graph.
-It invokes tools in a simple loop.
+It implements a multi-agent system with a supervisor, personal assistant, and specialists.
 """
 
-from react_agent.graph import graph
+# Avoid circular imports
+__all__ = []
 
-__all__ = ["graph"]
+# The graph will be imported when needed
+# Use: from react_agent.graph import graph

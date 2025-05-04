@@ -40,80 +40,80 @@ class InputState:
 
 @dataclass
 class State(InputState):
-    \"\"\"Represents the complete state of the agent, extending InputState with additional attributes.
+    """Represents the complete state of the agent, extending InputState with additional attributes.
 
     This class can be used to store any information needed throughout the agent's lifecycle.
-    \"\"\"
+    """
 
     is_last_step: IsLastStep = field(default=False)
-    \"\"\"
+    """
     Indicates whether the current step is the last one before the graph raises an error.
 
     This is a 'managed' variable, controlled by the state machine rather than user code.
     It is set to 'True' when the step count reaches recursion_limit - 1.
-    \"\"\"
+    """
 
     next: Optional[str] = field(default=None)
-    \"\"\"
+    """
     Indicates the next node to route to in the hierarchical agent system.
     Used by the supervisor agent to route requests to specialized agents.
-    \"\"\"
+    """
 
     active_agent: Optional[str] = field(default=None)
-    \"\"\"
+    """
     Tracks which specialized agent is currently handling the request.
-    \"\"\"
+    """
 
     feature_requests: List[Dict[str, Any]] = field(default_factory=list)
-    \"\"\"
+    """
     Stores documented feature requests that have been processed by the Feature Request agent.
     Each feature request is a dictionary with details about the request.
-    \"\"\"
+    """
 
     user_name: Optional[str] = field(default=None)
-    \"\"\"
+    """
     Stores the user's name retrieved from the session.
-    \"\"\"
+    """
 
     user_uid: Optional[str] = field(default=None)
-    \"\"\"
+    """
     Stores the unique user ID retrieved or generated from the session.
-    \"\"\"
+    """
     
     agent_status: Optional[str] = field(default=None)
-    \"\"\"
+    """
     Stores the current status of the agent for UI display purposes.
     Possible values include: thinking, routing, gathering_more_info, etc.
-    \"\"\"
+    """
 
     # New fields for the supervisor-PA architecture
     routing_reason: Optional[str] = field(default=None)
-    \"\"\"
+    """
     Stores the reason why the supervisor routed to a specific agent.
     Used to provide context for agents about why they were selected.
-    \"\"\"
+    """
     
     specialist_results: bool = field(default=False)
-    \"\"\"
+    """
     Flag indicating if there are specialist results waiting to be presented.
     Used by the PA agent to know when to present results.
-    \"\"\"
+    """
     
     first_message: bool = field(default=True)
-    \"\"\"
+    """
     Flag indicating if this is the first message in the conversation.
     Used for session initialization.
-    \"\"\"
+    """
     
     conversation_context: Dict[str, Any] = field(default_factory=dict)
-    \"\"\"
+    """
     Stores additional conversation context that might be useful for agents.
     Can include things like detected topics, user preferences, etc.
-    \"\"\"
+    """
     
     # Session management states
     session_state: Optional[str] = field(default=None)
-    \"\"\"
+    """
     Tracks the current state of the session management process.
     Possible values: checking, waiting_for_name, etc.
-    \"\"\"
+    """
