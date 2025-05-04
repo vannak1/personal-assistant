@@ -79,3 +79,9 @@ class State(InputState):
     \"\"\"
     Stores the unique user ID retrieved or generated from the session.
     \"\"\"
+    
+    agent_status: Optional[str] = field(default=None)
+    \"\"\"
+    Stores the current status of the agent for UI display purposes.
+    Possible values include: thinking, routing, gathering_more_info, etc.
+    \"\"\"

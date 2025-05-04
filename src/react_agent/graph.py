@@ -93,12 +93,26 @@ async def personal_assistant_agent(state: State) -> Dict:
             else:
                  # Should not happen in normal flow, but handle gracefully
                  print("PA: Could not find original user message after session check.")
-                 return {"messages": [AIMessage(content=f"Welcome back, {found_name}! What can I help you with today?", name="PersonalAssistant")], "active_agent": None, "next": "__end__"}
+                 # Create welcome back message with status
+                 welcome_message = AIMessage(
+                     content=f"Welcome back, {found_name}! What can I help you with today?", 
+                     name="PersonalAssistant"
+                 )
+                 welcome_message.additional_kwargs = {"status": "greeting_returning_user"}
+                 
+                 return {"messages": [welcome_message], "active_agent": None, "next": "__end__"}
         else:
             print("PA: No session found. Asking for user's name.")
             # Ask for name
+            # Create greeting message with status
+            greeting_message = AIMessage(
+                content="Hello there! I'm your personal assistant. I don't believe we've met, what's your name?", 
+                name="PersonalAssistant"
+            )
+            greeting_message.additional_kwargs = {"status": "greeting_new_user"}
+            
             return {
-                "messages": [AIMessage(content="Hello there! I'm your personal assistant. I don't believe we've met, what's your name?", name="PersonalAssistant")],
+                "messages": [greeting_message],
                 "active_agent": PA_STATE_WAITING_FOR_NAME, # Mark state as waiting for name
                 "next": "__end__" # Wait for user input
             }
@@ -161,8 +175,16 @@ async def personal_assistant_agent(state: State) -> Dict:
             {\"role\": \"system\", \"content\": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
             {\"role\": \"user\", \"content\": synthesis_prompt}
         ])
+        
+        # Create the response with status info
+        synthesized_response = AIMessage(content=final_response.content, name="PersonalAssistant")
+        synthesized_response.additional_kwargs = {
+            "status": "specialist_complete",
+            "specialist": last_message.name
+        }
+        
         return {
-            "messages": [AIMessage(content=final_response.content, name="PersonalAssistant")],
+            "messages": [synthesized_response],
             "next": "__end__"
         }
 
@@ -172,6 +194,11 @@ async def personal_assistant_agent(state: State) -> Dict:
         system_message = configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())
         response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": system_message}, *state.messages]))
         response.name = "PersonalAssistant"
+        
+        # Add status information for UI
+        if not hasattr(response, "additional_kwargs") or response.additional_kwargs is None:
+            response.additional_kwargs = {}
+        response.additional_kwargs["status"] = "tool_usage"
         if not response.tool_calls:
             print("PA: Finished handling directly after tool use.")
             return {"messages": [response], "active_agent": None, "next": "__end__"}
@@ -205,6 +232,11 @@ async def personal_assistant_agent(state: State) -> Dict:
         
         response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + clarity_prompt}, *state.messages]))
         response.name = "PersonalAssistant"
+        
+        # Add status information for UI
+        if not hasattr(response, "additional_kwargs") or response.additional_kwargs is None:
+            response.additional_kwargs = {}
+        response.additional_kwargs["status"] = "gathering_more_info"
         return {"messages": [response], "active_agent": None, "next": "__end__"}
         
     elif "DISCUSS_EXECUTION_APPROACH" in decision:
@@ -216,8 +248,12 @@ async def personal_assistant_agent(state: State) -> Dict:
         response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + discussion_prompt}, *state.messages]))
         response.name = "PersonalAssistant"
         
-        # Set a state flag to indicate we're waiting for confirmation
-        response.additional_kwargs = {"awaiting_execution_confirmation": True}
+        # Add status information for UI and set state flag to indicate we're waiting for confirmation
+        response.additional_kwargs = {
+            "awaiting_execution_confirmation": True,
+            "status": "discussing_approach",
+            "specialist_type": "execution"
+        }
         return {"messages": [response], "active_agent": None, "next": "__end__"}
         
     elif "DISCUSS_RESEARCH_APPROACH" in decision:
@@ -229,8 +265,12 @@ async def personal_assistant_agent(state: State) -> Dict:
         response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + discussion_prompt}, *state.messages]))
         response.name = "PersonalAssistant"
         
-        # Set a state flag to indicate we're waiting for confirmation
-        response.additional_kwargs = {"awaiting_research_confirmation": True}
+        # Add status information for UI and set state flag to indicate we're waiting for confirmation
+        response.additional_kwargs = {
+            "awaiting_research_confirmation": True,
+            "status": "discussing_approach",
+            "specialist_type": "research"
+        }
         return {"messages": [response], "active_agent": None, "next": "__end__"}
         
     # Check if user confirmed a specialist handoff (look for confirmation in the last message)
@@ -267,7 +307,7 @@ Based on our conversation, we have gathered these key details:
                     state.messages.append(AIMessage(
                         content=execution_context, 
                         name="PersonalAssistant_ContextNote",
-                        additional_kwargs={"is_context": True}
+                        additional_kwargs={"is_context": True, "status": "specialist_routing", "specialist": "ExecutionEnforcer"}
                     ))
                     return {"next": "execution_enforcer_agent", "active_agent": "execution_enforcer"}
                 
@@ -300,7 +340,7 @@ Based on our conversation, we have gathered these key details:
                     state.messages.append(AIMessage(
                         content=research_context, 
                         name="PersonalAssistant_ContextNote",
-                        additional_kwargs={"is_context": True}
+                        additional_kwargs={"is_context": True, "status": "specialist_routing", "specialist": "DeepResearch"}
                     ))
                     return {"next": "deep_research_agent", "active_agent": "deep_research"}
     
@@ -310,6 +350,11 @@ Based on our conversation, we have gathered these key details:
     direct_handling_prompt = f\"System time: {datetime.now(tz=UTC).isoformat()}\nUser name: {current_user_name}\" # Example context
     response = cast(AIMessage, await model.ainvoke([{"role": "system", "content": configuration.personal_assistant_prompt + "\n" + direct_handling_prompt}, *state.messages]))
     response.name = "PersonalAssistant"
+    
+    # Add status information for UI
+    if not hasattr(response, "additional_kwargs") or response.additional_kwargs is None:
+        response.additional_kwargs = {}
+    response.additional_kwargs["status"] = "thinking_complete"
     if not response.tool_calls:
         print("PA: Finished handling directly.")
         return {"messages": [response], "active_agent": None, "next": "__end__"}
@@ -354,6 +399,12 @@ async def execution_enforcer_agent(state: State) -> Dict:
         ),
     )
     response.name = "ExecutionEnforcer" # Name the response
+    
+    # Add status information for UI
+    if not hasattr(response, "additional_kwargs") or response.additional_kwargs is None:
+        response.additional_kwargs = {}
+    response.additional_kwargs["status"] = "specialist_active"
+    response.additional_kwargs["specialist"] = "ExecutionEnforcer"
 
     if not response.tool_calls:
          print("Execution Enforcer: Finished (no tool calls).")
@@ -409,6 +460,12 @@ async def deep_research_agent(state: State) -> Dict:
         ),
     )
     response.name = "DeepResearch" # Name the response
+    
+    # Add status information for UI
+    if not hasattr(response, "additional_kwargs") or response.additional_kwargs is None:
+        response.additional_kwargs = {}
+    response.additional_kwargs["status"] = "specialist_active"
+    response.additional_kwargs["specialist"] = "DeepResearch"
 
     if not response.tool_calls:
         print("Deep Research Agent: Finished (no tool calls).")
