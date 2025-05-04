@@ -40,32 +40,42 @@ class InputState:
 
 @dataclass
 class State(InputState):
-    """Represents the complete state of the agent, extending InputState with additional attributes.
+    \"\"\"Represents the complete state of the agent, extending InputState with additional attributes.
 
     This class can be used to store any information needed throughout the agent's lifecycle.
-    """
+    \"\"\"
 
     is_last_step: IsLastStep = field(default=False)
-    """
+    \"\"\"
     Indicates whether the current step is the last one before the graph raises an error.
 
     This is a 'managed' variable, controlled by the state machine rather than user code.
     It is set to 'True' when the step count reaches recursion_limit - 1.
-    """
+    \"\"\"
 
     next: Optional[str] = field(default=None)
-    """
+    \"\"\"
     Indicates the next node to route to in the hierarchical agent system.
     Used by the supervisor agent to route requests to specialized agents.
-    """
+    \"\"\"
 
     active_agent: Optional[str] = field(default=None)
-    """
+    \"\"\"
     Tracks which specialized agent is currently handling the request.
-    """
+    \"\"\"
 
     feature_requests: List[Dict[str, Any]] = field(default_factory=list)
-    """
+    \"\"\"
     Stores documented feature requests that have been processed by the Feature Request agent.
     Each feature request is a dictionary with details about the request.
-    """
+    \"\"\"
+
+    user_name: Optional[str] = field(default=None)
+    \"\"\"
+    Stores the user's name retrieved from the session.
+    \"\"\"
+
+    user_uid: Optional[str] = field(default=None)
+    \"\"\"
+    Stores the unique user ID retrieved or generated from the session.
+    \"\"\"
