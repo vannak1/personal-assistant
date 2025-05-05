@@ -14,11 +14,10 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
 
-from react_agent.config_store import ConfigStore
+from react_agent.configuration import Configuration
 from react_agent.state import State, InputState
 from react_agent.tools import TOOLS, manage_user_session
 from react_agent.utils import load_chat_model
-from react_agent import prompts
 
 # Define specific session states
 SESSION_STATE_CHECKING = "session_checking"
@@ -30,7 +29,8 @@ async def supervisor_agent(state: State) -> Dict:
     The supervisor agent that analyzes requests and routes them to specialized agents.
     """
     print(f"--- Running Supervisor Agent (State: {state.active_agent}) ---")
-    model = load_chat_model(ConfigStore.supervisor_model)
+    configuration = Configuration.from_context()
+    model = load_chat_model(configuration.supervisor_model)
     
     last_message = state.messages[-1]
     
@@ -67,7 +67,7 @@ async def supervisor_agent(state: State) -> Dict:
     current_user_name = state.user_name or "User"
     
     # Analyze the request to determine routing
-    system_message = prompts.SUPERVISOR_PROMPT.format(system_time=datetime.now(tz=UTC).isoformat())
+    system_message = configuration.supervisor_prompt.format(system_time=datetime.now(tz=UTC).isoformat())
     routing_prompt = f"""
 User ({current_user_name}) request: '{user_request_message.content}'.
 
@@ -154,7 +154,8 @@ async def personal_assistant_agent(state: State) -> Dict:
     session management, and result presentation.
     """
     print(f"--- Running Personal Assistant Agent (State: {state.active_agent}) ---")
-    model = load_chat_model(ConfigStore.personal_assistant_model).bind_tools(TOOLS)
+    configuration = Configuration.from_context()
+    model = load_chat_model(configuration.personal_assistant_model).bind_tools(TOOLS)
     
     last_message = state.messages[-1]
     current_user_name = state.user_name
@@ -273,7 +274,7 @@ Present this information back to {current_user_name} in a friendly, conversation
 """
         
         response = await model.ainvoke([
-            {"role": "system", "content": prompts.PERSONAL_ASSISTANT_PROMPT.format(system_time=datetime.now(tz=UTC).isoformat())},
+            {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
             {"role": "user", "content": presentation_prompt}
         ])
         
@@ -316,7 +317,7 @@ Handle this request directly in a friendly, conversational manner. You can use t
     history = [msg for msg in state.messages if not isinstance(msg, ToolMessage)][-5:]  # Last 5 non-tool messages
     
     response = cast(AIMessage, await model.ainvoke([
-        {"role": "system", "content": prompts.PERSONAL_ASSISTANT_PROMPT.format(system_time=datetime.now(tz=UTC).isoformat())},
+        {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
         *history[:-1],  # Previous messages for context
         {"role": "user", "content": direct_prompt}
     ]))
@@ -344,9 +345,10 @@ async def execution_enforcer_agent(state: State) -> Dict:
     Execution Enforcer Agent: Turns ideas into actionable plans.
     """
     print("--- Running Execution Enforcer Agent ---")
+    configuration = Configuration.from_context()
     # Use the specific model for this agent
-    model = load_chat_model(ConfigStore.execution_enforcer_model).bind_tools(TOOLS)
-    system_message = prompts.FEATURE_REQUEST_PROMPT.format(
+    model = load_chat_model(configuration.execution_enforcer_model).bind_tools(TOOLS)
+    system_message = configuration.feature_request_prompt.format(
         system_time=datetime.now(tz=UTC).isoformat()
     )
     
@@ -406,9 +408,10 @@ async def deep_research_agent(state: State) -> Dict:
     Deep research agent that provides in-depth information on complex topics.
     """
     print("--- Running Deep Research Agent ---")
+    configuration = Configuration.from_context()
     # Use the specific model for this agent
-    model = load_chat_model(ConfigStore.deep_research_model).bind_tools(TOOLS)
-    system_message = prompts.DEEP_RESEARCH_PROMPT.format(
+    model = load_chat_model(configuration.deep_research_model).bind_tools(TOOLS)
+    system_message = configuration.deep_research_prompt.format(
         system_time=datetime.now(tz=UTC).isoformat()
     )
 
@@ -455,7 +458,7 @@ async def deep_research_agent(state: State) -> Dict:
 
 
 # Build the hierarchical multi-agent graph
-builder = StateGraph(State, input=InputState, config_schema=ConfigStore)
+builder = StateGraph(State, input=InputState, config_schema=Configuration)
 
 # Add the nodes
 builder.add_node("supervisor_agent", supervisor_agent)
