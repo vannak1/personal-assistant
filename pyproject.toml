@@ -16,7 +16,8 @@ dependencies = [
     "langchain-fireworks>=0.1.7",
     "python-dotenv>=1.0.1",
     "langchain-tavily>=0.1",
-    "langchain-community>=0.0.20",  # For DeepSeek support
+    "langchain-community>=0.0.20",
+    "langchain-deepseek>=0.1.3",  # For updated DeepSeek support
 ]
 
 
