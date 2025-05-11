@@ -16,7 +16,7 @@ from langgraph.prebuilt import ToolNode
 
 from react_agent.configuration import Configuration
 from react_agent.state import State, InputState
-from react_agent.tools import TOOLS, manage_user_session
+from react_agent.tools import TOOLS
 from react_agent.utils import load_chat_model
 
 # Define specific session states
