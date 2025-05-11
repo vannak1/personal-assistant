@@ -54,7 +54,7 @@ class Configuration:
     
     # Agent-specific models
     supervisor_model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
-        default="deepseek/deepseek-chat",
+        default="openai/gpt-4-turbo",
         metadata={
             "description": "The model used for the supervisor agent's routing decisions."
         },

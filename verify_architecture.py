@@ -13,26 +13,17 @@ load_dotenv()
 def check_env_variables():
     """Check if necessary environment variables are set."""
     print("Checking environment variables...")
-    
-    # Check DeepSeek API key
-    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not deepseek_api_key:
-        print("❌ DEEPSEEK_API_KEY is not set in the .env file")
-        status_deepseek = False
-    else:
-        print("✅ DEEPSEEK_API_KEY is properly set")
-        status_deepseek = True
-    
+
     # Check OpenAI API key
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if not openai_api_key:
-        print("⚠️ OPENAI_API_KEY is not set in the .env file (needed for PA and specialist agents)")
+        print("❌ OPENAI_API_KEY is not set in the .env file (needed for all agents)")
         status_openai = False
     else:
         print("✅ OPENAI_API_KEY is properly set")
         status_openai = True
-    
-    return status_deepseek and status_openai
+
+    return status_openai
 
 def check_dependencies():
     """Check if required dependencies are installed."""
@@ -169,8 +160,8 @@ def main():
         # Give specific advice based on what failed
         if not env_check:
             print("\nEnvironment Variable Tips:")
-            print("- Make sure your .env file contains both DEEPSEEK_API_KEY and OPENAI_API_KEY")
-            print("- Verify that the API keys are valid")
+            print("- Make sure your .env file contains OPENAI_API_KEY")
+            print("- Verify that the API key is valid")
         
         if not arch_check or not prompt_check:
             print("\nCode Implementation Tips:")

@@ -10,24 +10,24 @@ load_dotenv()
 def check_env_variables():
     """Check if necessary environment variables are set."""
     print("Checking environment variables...")
-    
-    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not deepseek_api_key:
-        print("❌ DEEPSEEK_API_KEY is not set in the .env file")
+
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        print("❌ OPENAI_API_KEY is not set in the .env file")
         return False
-    
-    print("✅ DEEPSEEK_API_KEY is properly set")
+
+    print("✅ OPENAI_API_KEY is properly set")
     return True
 
 def check_dependencies():
     """Check if required dependencies are installed."""
     try:
         import langchain_community
-        from langchain_community.chat_models import ChatDeepSeek
-        print("✅ langchain-community is properly installed")
+        from langchain_openai import ChatOpenAI
+        print("✅ langchain-community and langchain-openai are properly installed")
         return True
     except ImportError:
-        print("❌ langchain-community is not installed. Run 'pip install langchain-community'")
+        print("❌ Required packages are not installed. Run 'pip install langchain-community langchain-openai'")
         return False
 
 def main():
@@ -38,7 +38,7 @@ def main():
     dep_check = check_dependencies()
     
     if env_check and dep_check:
-        print("\n✨ All checks passed! Your personal assistant is correctly configured to use DeepSeek-V3.")
+        print("\n✨ All checks passed! Your personal assistant is correctly configured to use GPT-4 Turbo.")
         print("\nTo use it, run the assistant with:")
         print("   python -m langgraph-cli serve -d src/react_agent")
     else:

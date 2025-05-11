@@ -29,18 +29,6 @@ def load_chat_model(fully_specified_name: str) -> BaseChatModel:
         fully_specified_name (str): String in the format 'provider/model'.
     """
     provider, model = fully_specified_name.split("/", maxsplit=1)
-    
-    # Special handling for DeepSeek models
-    if provider.lower() == "deepseek":
-        from langchain_deepseek import ChatDeepSeek
-        # Load API key from environment
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            raise ValueError("DEEPSEEK_API_KEY environment variable not set")
-        return ChatDeepSeek(
-            model=model,
-            api_key=api_key,
-        )
-    
-    # Default handling for other providers
+
+    # Default handling for all providers (including OpenAI)
     return init_chat_model(model, model_provider=provider)
