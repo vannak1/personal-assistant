@@ -256,7 +256,20 @@ async def personal_assistant_agent(state: State) -> Dict:
             """
 
             print("PA: Calling LLM to synthesize search results...")
-            context_messages = [msg for msg in state.messages if isinstance(msg, HumanMessage)][-2:]
+
+            # Create context for the model
+            context_messages = []
+
+            # Add the original query message if available in conversation context
+            original_query = state.conversation_context.get("original_search_query")
+            if original_query:
+                context_messages.append({"role": "user", "content": original_query})
+
+            # Include recent messages for additional context
+            recent_messages = [msg for msg in state.messages if isinstance(msg, HumanMessage)][-2:]
+            for msg in recent_messages:
+                if msg.content != original_query:  # Avoid duplicating the original query
+                    context_messages.append({"role": "user", "content": msg.content})
 
             response = await model.ainvoke([
                 {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
@@ -322,10 +335,13 @@ async def personal_assistant_agent(state: State) -> Dict:
                 "next": "deep_research_agent"
             }
         elif "WEB_SEARCH" in routing_decision:
+            # Store the original query in the conversation context
+            user_request = last_message.content
             return {
                 "messages": [context_note],
                 "routing_reason": "web_search_needed",
                 "active_agent": "web_search",
+                "conversation_context": {"original_search_query": user_request},
                 "next": "web_search_agent"
             }
         else:
@@ -492,20 +508,24 @@ async def web_search_agent(state: State) -> Dict:
     model = load_chat_model(configuration.web_search_model).bind_tools(TOOLS)
 
     # Extract original query
-    original_user_request = None
-    context_note = next((msg for msg in reversed(state.messages) 
-                        if getattr(msg, 'name', None) == 'PersonalAssistant_ContextNote'), None)
+    # First try to use the stored context from personal assistant
+    original_user_request = state.conversation_context.get("original_search_query")
 
-    if context_note and isinstance(context_note.content, str) and "Request:" in context_note.content:
-        request_line = [line for line in context_note.content.split('\n') if "Request:" in line]
-        if request_line:
-            original_user_request = request_line[0].replace("Request:", "").strip()
-
+    # Fallback to existing methods if not in context
     if not original_user_request:
-        user_request_message = next((msg for msg in reversed(state.messages) 
-                                   if isinstance(msg, HumanMessage)), None)
-        if user_request_message:
-            original_user_request = user_request_message.content
+        context_note = next((msg for msg in reversed(state.messages)
+                            if getattr(msg, 'name', None) == 'PersonalAssistant_ContextNote'), None)
+
+        if context_note and isinstance(context_note.content, str) and "Request:" in context_note.content:
+            request_line = [line for line in context_note.content.split('\n') if "Request:" in line]
+            if request_line:
+                original_user_request = request_line[0].replace("Request:", "").strip()
+
+        if not original_user_request:
+            user_request_message = next((msg for msg in reversed(state.messages)
+                                       if isinstance(msg, HumanMessage)), None)
+            if user_request_message:
+                original_user_request = user_request_message.content
 
     search_query = original_user_request if original_user_request else "general information"
 
@@ -533,6 +553,10 @@ async def web_search_agent(state: State) -> Dict:
         return {
             "messages": [result_carrier_message],
             "active_agent": None,
+            "conversation_context": {
+                "original_search_query": search_query,
+                **state.conversation_context
+            },
             "next": "personal_assistant_agent"
         }
     else:
