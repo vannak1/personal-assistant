@@ -421,6 +421,8 @@ async def personal_assistant_agent(state: State) -> Dict:
                 4. Uses a warm, conversational tone appropriate for {current_user_name}
                 5. Cites sources when appropriate
                 6. Addresses any limitations in the search results
+
+                IMPORTANT: Make sure to reference that you searched the web for this information.
                 """
 
                 # Process the search results to generate a comprehensive response
@@ -429,7 +431,12 @@ async def personal_assistant_agent(state: State) -> Dict:
                     {"role": "user", "content": search_presentation_prompt}
                 ])
 
-                result_message = AIMessage(content=response.content, name="PersonalAssistant")
+                # Ensure we mention searching the web if not already included
+                content = response.content
+                if not any(phrase in content.lower() for phrase in ["i searched", "searched the web", "search results", "found online"]):
+                    content = f"Based on my web search about '{original_query}', I found the following information:\n\n{content}"
+
+                result_message = AIMessage(content=content, name="PersonalAssistant")
                 result_message.additional_kwargs = {
                     "status": "presenting_search_results",
                     "specialist_source": specialist_type,
@@ -650,38 +657,28 @@ async def web_search_agent(state: State) -> Dict:
 
     When search results are found, the agent will pass the results along with the original
     query back to the personal assistant for further processing.
+
+    This agent handles web searches internally without exposing tool calls to the frontend.
     """
     print("--- Running Web Search Agent ---")
     configuration = Configuration.from_context()
     # Use the specific model for this agent
-    model = load_chat_model(configuration.deep_research_model).bind_tools(TOOLS)
+    model = load_chat_model(configuration.deep_research_model)
 
     # Create a custom prompt for web search
     web_search_prompt = """You are a Web Search Agent specializing in finding accurate and current information.
 
     Your primary role is to:
     1. Formulate effective search queries based on user requests
-    2. Execute web searches to retrieve relevant information
-    3. Process and present search results in a clear, organized format
-    4. Verify information when possible using multiple sources
-    5. Provide direct answers with citations to sources
-
-    When searching:
-    - Use specific, targeted search queries
-    - Filter domains when appropriate for better results
-    - Break complex questions into simpler search queries
-    - Always cite your sources by providing URLs
-    - Indicate when information might be outdated
+    2. Process and present search results in a clear, organized format
+    3. Verify information when possible using multiple sources
+    4. Provide direct answers with citations to sources
 
     Present your findings in a clear, structured format with:
     - A direct answer to the user's question
     - Supporting evidence or details
     - Source citations (URLs)
     - Any limitations or caveats about the information
-
-    Remember that you have access to current information through web search tools, so use them to provide the most up-to-date responses.
-
-    IMPORTANT: When you are done searching, include the original user request in your response prefixed with "ORIGINAL_QUERY:" on a new line at the end of your response. This will help the personal assistant process the results.
 
     System time: {system_time}"""
 
@@ -703,7 +700,7 @@ async def web_search_agent(state: State) -> Dict:
                         original_user_request = request_line[0].replace("Request:", "").strip()
         # Include all user messages, but not PA or Supervisor responses
         elif isinstance(msg, HumanMessage) or (isinstance(msg, AIMessage) and
-                                              getattr(msg, 'name', None) not in ['PersonalAssistant', 'Supervisor']):
+                                             getattr(msg, 'name', None) not in ['PersonalAssistant', 'Supervisor']):
             agent_messages.append(msg)
             # If we haven't found a request yet, use the last human message
             if original_user_request is None and isinstance(msg, HumanMessage):
@@ -713,38 +710,86 @@ async def web_search_agent(state: State) -> Dict:
     if original_user_request:
         state.conversation_context["original_query"] = original_user_request
 
-    # Add context notes at the beginning for better context
-    agent_messages = context_notes + agent_messages
-
-    response = cast(
-        AIMessage,
-        await model.ainvoke(
-            [{"role": "system", "content": web_search_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
-             *agent_messages]
-        ),
+    # First, send an acknowledgment message about searching
+    acknowledgment_message = AIMessage(
+        content=f"I'll search the web for information about '{original_user_request}'. One moment please...",
+        name="WebSearchAgent"
     )
-    response.name = "WebSearchAgent" # Name the response
-
-    # Add status information
-    response.additional_kwargs = {
-        "status": "specialist_active",
+    acknowledgment_message.additional_kwargs = {
+        "status": "searching",
         "specialist": "WebSearchAgent",
     }
 
-    # Add original query to response kwargs
-    if original_user_request:
-        response.additional_kwargs["original_query"] = original_user_request
+    # Add this message to the state but don't return it yet
+    state.messages.append(acknowledgment_message)
 
-    if not response.tool_calls:
-        print("Web Search Agent: Finished (no tool calls).")
+    # Now perform the actual search internally using the web_search tool
+    from react_agent.tools import web_search
+    search_query = original_user_request if original_user_request else "unknown query"
+
+    try:
+        # Execute the search directly without exposing tool calls
+        search_results = await web_search(query=search_query)
+
+        # Add context notes at the beginning for better context
+        agent_messages = context_notes + agent_messages
+
+        # Prepare a prompt for processing the search results
+        search_processing_prompt = f"""
+        The user asked: '{search_query}'
+
+        I searched the web and found these results:
+
+        {search_results}
+
+        Based on these search results, provide a comprehensive answer to the user's question.
+        Include relevant information from the search results and cite sources when appropriate.
+        """
+
+        # Process the search results into a coherent response
+        response = cast(
+            AIMessage,
+            await model.ainvoke(
+                [{"role": "system", "content": web_search_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
+                 *agent_messages,
+                 {"role": "user", "content": search_processing_prompt}]
+            ),
+        )
+
+        # Create a new message with the processed results but no tool calls
+        result_message = AIMessage(content=response.content, name="WebSearchAgent")
+
+        # Add status information and the original query
+        result_message.additional_kwargs = {
+            "status": "specialist_active",
+            "specialist": "WebSearchAgent",
+            "original_query": original_user_request
+        }
+
+        print("Web Search Agent: Finished (search completed internally).")
         return {
-            "messages": [response],
+            "messages": [result_message],
             "next": "supervisor_agent" # Return to supervisor for presentation
         }
-    else:
-        print("Web Search Agent: Requesting tools.")
-        # Keep active_agent set, return message with tool calls
-        return {"messages": [response]} 
+
+    except Exception as e:
+        # Handle errors gracefully
+        error_message = AIMessage(
+            content=f"I encountered an issue while searching for information about '{search_query}': {str(e)}. Let me try to answer based on what I already know.",
+            name="WebSearchAgent"
+        )
+        error_message.additional_kwargs = {
+            "status": "error",
+            "specialist": "WebSearchAgent",
+            "original_query": original_user_request,
+            "error": str(e)
+        }
+
+        print(f"Web Search Agent: Error during search - {str(e)}")
+        return {
+            "messages": [error_message],
+            "next": "supervisor_agent"
+        }
 
 
 # Build the hierarchical multi-agent graph
