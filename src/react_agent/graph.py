@@ -55,7 +55,13 @@ async def personal_assistant_agent(state: State) -> Dict:
     if state.first_message and not state.user_name and state.session_state is None:
         print("PA: First message, initiating session check.")
         tool_call_id = f"tool_call_{uuid.uuid4()}"
-        
+
+        # Store the original question if it exists
+        original_question = None
+        if state.messages and isinstance(state.messages[-1], HumanMessage):
+            original_question = state.messages[-1].content
+            print(f"PA: Storing original question: {original_question}")
+
         return {
             "messages": [AIMessage(
                 content="",
@@ -68,7 +74,8 @@ async def personal_assistant_agent(state: State) -> Dict:
             )],
             "session_state": SESSION_STATE_CHECKING,
             "active_agent": "personal_assistant",
-            "first_message": False
+            "first_message": False,
+            "original_question": original_question
         }
 
     # B. Received session check result
@@ -146,16 +153,63 @@ async def personal_assistant_agent(state: State) -> Dict:
             user_name = "friend"
             user_uid = None
 
-        greeting_message = AIMessage(
-            content=f"Nice to meet you, {user_name}! I'm here to help. What can I do for you today?",
-            name="PersonalAssistant"
-        )
+        # Check if the user had an original question
+        if state.original_question:
+            print(f"PA: User had an original question: {state.original_question}")
+            greeting_message = AIMessage(
+                content=f"Nice to meet you, {user_name}! I'll now answer your original question: '{state.original_question}'",
+                name="PersonalAssistant"
+            )
+
+            # Return the greeting and prepare to answer the original question
+            return {
+                "messages": [greeting_message],
+                "user_name": user_name,
+                "user_uid": user_uid,
+                "session_state": None,
+                "active_agent": "personal_assistant",
+                "routing_reason": "answering_original_question",
+                "next": "personal_assistant_agent"  # Continue to answer the question
+            }
+        else:
+            # Standard greeting if no original question
+            greeting_message = AIMessage(
+                content=f"Nice to meet you, {user_name}! I'm here to help. What can I do for you today?",
+                name="PersonalAssistant"
+            )
+            return {
+                "messages": [greeting_message],
+                "user_name": user_name,
+                "user_uid": user_uid,
+                "session_state": None,
+                "active_agent": None,
+                "next": "__end__"
+            }
+
+    # --- Handle Original Question After Onboarding ---
+    if state.routing_reason == "answering_original_question" and state.original_question:
+        print(f"PA: Now answering original question after onboarding: {state.original_question}")
+
+        # Create a prompt to answer the original question
+        direct_prompt = f"""
+        User ({current_user_name}) has just completed onboarding.
+        Their original question was: '{state.original_question}'
+
+        Answer their question in a helpful, conversational tone.
+        """
+
+        response = await model.ainvoke([
+            {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
+            {"role": "user", "content": direct_prompt}
+        ])
+
+        response.name = "PersonalAssistant"
+
         return {
-            "messages": [greeting_message],
-            "user_name": user_name,
-            "user_uid": user_uid,
-            "session_state": None,
+            "messages": [response],
             "active_agent": None,
+            "routing_reason": None,
+            "original_question": None,  # Clear the original question since we've answered it
             "next": "__end__"
         }
 

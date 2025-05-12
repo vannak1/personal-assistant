@@ -79,7 +79,7 @@ class State(InputState):
     """
     Stores the unique user ID retrieved or generated from the session.
     """
-    
+
     agent_status: Optional[str] = field(default=None)
     """
     Stores the current status of the agent for UI display purposes.
@@ -92,25 +92,31 @@ class State(InputState):
     Stores the reason why the supervisor routed to a specific agent.
     Used to provide context for agents about why they were selected.
     """
-    
+
     specialist_results: bool = field(default=False)
     """
     Flag indicating if there are specialist results waiting to be presented.
     Used by the PA agent to know when to present results.
     """
-    
+
     first_message: bool = field(default=True)
     """
     Flag indicating if this is the first message in the conversation.
     Used for session initialization.
     """
-    
+
+    original_question: Optional[str] = field(default=None)
+    """
+    Stores the user's original question when they first interact with the system
+    without having a session. This allows answering their question after onboarding.
+    """
+
     conversation_context: Dict[str, Any] = field(default_factory=dict)
     """
     Stores additional conversation context that might be useful for agents.
     Can include things like detected topics, user preferences, etc.
     """
-    
+
     # Session management states
     session_state: Optional[str] = field(default=None)
     """
