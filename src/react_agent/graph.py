@@ -658,12 +658,12 @@ async def web_search_agent(state: State) -> Dict:
     When search results are found, the agent will pass the results along with the original
     query back to the personal assistant for further processing.
 
-    This agent handles web searches internally without exposing tool calls to the frontend.
+    This agent uses the proper tool calling flow to ensure responses match tool calls.
     """
     print("--- Running Web Search Agent ---")
     configuration = Configuration.from_context()
-    # Use the specific model for this agent
-    model = load_chat_model(configuration.deep_research_model)
+    # Use the specific model for this agent WITH tool binding
+    model = load_chat_model(configuration.deep_research_model).bind_tools(TOOLS)
 
     # Create a custom prompt for web search
     web_search_prompt = """You are a Web Search Agent specializing in finding accurate and current information.
@@ -679,6 +679,8 @@ async def web_search_agent(state: State) -> Dict:
     - Supporting evidence or details
     - Source citations (URLs)
     - Any limitations or caveats about the information
+
+    IMPORTANT: Use the 'search' tool to look up information. DO NOT attempt to answer without searching first.
 
     System time: {system_time}"""
 
@@ -710,39 +712,35 @@ async def web_search_agent(state: State) -> Dict:
     if original_user_request:
         state.conversation_context["original_query"] = original_user_request
 
-    # First, send an acknowledgment message about searching
-    acknowledgment_message = AIMessage(
-        content=f"I'll search the web for information about '{original_user_request}'. One moment please...",
-        name="WebSearchAgent"
-    )
-    acknowledgment_message.additional_kwargs = {
-        "status": "searching",
-        "specialist": "WebSearchAgent",
-    }
-
-    # Add this message to the state but don't return it yet
-    state.messages.append(acknowledgment_message)
-
-    # Now perform the actual search internally using the search tool
-    from react_agent.tools import search
     search_query = original_user_request if original_user_request else "unknown query"
 
-    try:
-        # Execute the search directly without exposing tool calls
-        search_results_raw = await search(query=search_query)
+    # Check if this is a ToolMessage response to a previous search request
+    last_message = state.messages[-1]
+    if isinstance(last_message, ToolMessage):
+        # We've received search results, now we need to process them
+        search_results_raw = last_message.content
 
         # Format the search results into a readable format
         search_results = "Search results for: " + search_query + "\n\n"
 
         if search_results_raw:
-            for i, result in enumerate(search_results_raw, 1):
-                title = result.get("title", "Untitled")
-                url = result.get("url", "")
-                content = result.get("content", "")
+            try:
+                # Convert string to dict if needed
+                if isinstance(search_results_raw, str):
+                    import json
+                    search_results_raw = json.loads(search_results_raw)
 
-                search_results += f"{i}. {title}\n"
-                search_results += f"   URL: {url}\n"
-                search_results += f"   {content[:200]}...\n\n"
+                # Format the results
+                for i, result in enumerate(search_results_raw, 1):
+                    title = result.get("title", "Untitled")
+                    url = result.get("url", "")
+                    content = result.get("content", "")
+
+                    search_results += f"{i}. {title}\n"
+                    search_results += f"   URL: {url}\n"
+                    search_results += f"   {content[:200]}...\n\n"
+            except (json.JSONDecodeError, TypeError):
+                search_results += "Error processing search results format. Raw results: " + str(search_results_raw)
         else:
             search_results = "No search results found for your query."
 
@@ -771,7 +769,7 @@ async def web_search_agent(state: State) -> Dict:
             ),
         )
 
-        # Create a new message with the processed results but no tool calls
+        # Create a new message with the processed results
         result_message = AIMessage(content=response.content, name="WebSearchAgent")
 
         # Add status information and the original query
@@ -781,29 +779,35 @@ async def web_search_agent(state: State) -> Dict:
             "original_query": original_user_request
         }
 
-        print("Web Search Agent: Finished (search completed internally).")
+        print("Web Search Agent: Finished (search results processed).")
         return {
             "messages": [result_message],
             "next": "supervisor_agent" # Return to supervisor for presentation
         }
+    else:
+        # This is the first step - we need to initiate the search
+        # Send a message with a tool call to the search tool
+        tool_call_id = f"tool_call_{uuid.uuid4()}"
 
-    except Exception as e:
-        # Handle errors gracefully
-        error_message = AIMessage(
-            content=f"I encountered an issue while searching for information about '{search_query}': {str(e)}. Let me try to answer based on what I already know.",
+        search_request = AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "search",
+                "args": {"query": search_query},
+                "id": tool_call_id
+            }],
             name="WebSearchAgent"
         )
-        error_message.additional_kwargs = {
-            "status": "error",
+        search_request.additional_kwargs = {
+            "status": "searching",
             "specialist": "WebSearchAgent",
-            "original_query": original_user_request,
-            "error": str(e)
+            "original_query": original_user_request
         }
 
-        print(f"Web Search Agent: Error during search - {str(e)}")
+        print(f"Web Search Agent: Initiating search for '{search_query}' with tool_call_id {tool_call_id}")
         return {
-            "messages": [error_message],
-            "next": "supervisor_agent"
+            "messages": [search_request],
+            "active_agent": "web_search"  # Maintain agent state for tool response
         }
 
 
