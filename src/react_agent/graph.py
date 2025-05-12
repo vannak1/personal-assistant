@@ -40,7 +40,6 @@ async def personal_assistant_agent(state: State) -> Dict:
     """
     print(f"--- Running Personal Assistant Agent ---")
     configuration = Configuration.from_context()
-    # Bind tools for potential direct use by PA
     model = load_chat_model(configuration.personal_assistant_model).bind_tools(TOOLS)
 
     last_message = state.messages[-1] if state.messages else None
@@ -51,11 +50,10 @@ async def personal_assistant_agent(state: State) -> Dict:
     print(f"PA: Last message type: {type(last_message).__name__ if last_message else 'None'}")
 
     # --- Session & User Management Logic ---
+    
     # A. First message, need to check session
     if state.first_message and not state.user_name and state.session_state is None:
         print("PA: First message, initiating session check.")
-        state.first_message = False
-        state.session_state = SESSION_STATE_CHECKING
         tool_call_id = f"tool_call_{uuid.uuid4()}"
         
         return {
@@ -119,7 +117,6 @@ async def personal_assistant_agent(state: State) -> Dict:
     if isinstance(last_message, HumanMessage) and state.session_state == SESSION_STATE_WAITING_FOR_NAME:
         print("PA: User provided name, saving session.")
         user_name = last_message.content.strip()
-        state.session_state = SESSION_STATE_NAME_RECEIVED
         tool_call_id = f"tool_call_{uuid.uuid4()}"
         
         return {
@@ -309,17 +306,23 @@ async def personal_assistant_agent(state: State) -> Dict:
     if isinstance(last_message, ToolMessage) and state.active_agent == "personal_assistant":
         print("PA: Received tool result for direct handling.")
         
-        direct_prompt = f"Based on the tool result, provide a response to {current_user_name}."
-        history = state.messages[-5:]
-        
-        response = await model.ainvoke(history)
-        response.name = "PersonalAssistant"
-        
-        return {
-            "messages": [response],
-            "active_agent": None,
-            "next": "__end__"
-        }
+        # If we're not in a specific session state, handle normally
+        if state.session_state is None:
+            direct_prompt = f"Based on the tool result, provide a response to {current_user_name}."
+            history = state.messages[-5:]
+            
+            response = await model.ainvoke(history)
+            response.name = "PersonalAssistant"
+            
+            return {
+                "messages": [response],
+                "active_agent": None,
+                "next": "__end__"
+            }
+        else:
+            # Let session state logic handle it
+            print("PA: Tool result during session state, continuing session flow.")
+            pass
 
     # Fallback
     print("PA: Reached fallback state.")
@@ -360,8 +363,16 @@ async def features_agent(state: State) -> Dict:
 
     if not response.tool_calls:
         print("Features Agent: Task complete.")
+        final_message = AIMessage(
+            content=response.content,
+            name="FeaturesAgent",
+            additional_kwargs={
+                "status": "results_obtained",
+                "specialist": "FeaturesAgent"
+            }
+        )
         return {
-            "messages": [response],
+            "messages": [final_message],
             "active_agent": None,
             "next": "personal_assistant_agent"
         }
@@ -399,8 +410,16 @@ async def deep_research_agent(state: State) -> Dict:
 
     if not response.tool_calls:
         print("Deep Research Agent: Task complete.")
+        final_message = AIMessage(
+            content=response.content,
+            name="DeepResearch",
+            additional_kwargs={
+                "status": "results_obtained",
+                "specialist": "DeepResearch"
+            }
+        )
         return {
-            "messages": [response],
+            "messages": [final_message],
             "active_agent": None,
             "next": "personal_assistant_agent"
         }
@@ -487,16 +506,13 @@ async def web_search_agent(state: State) -> Dict:
 builder = StateGraph(State, input=InputState, config_schema=Configuration)
 
 # Add nodes
-builder.add_node("personal_assistant_agent", personal_assistant_agent, 
-                retry=RetryPolicy(max_attempts=3))
+builder.add_node("personal_assistant_agent", personal_assistant_agent)
 builder.add_node("features_agent", features_agent)
 builder.add_node("deep_research_agent", deep_research_agent)
 builder.add_node("web_search_agent", web_search_agent)
 
 # Create ToolNode with error handling
-# Explicitly list each tool to ensure they are properly registered
-from react_agent.tools import search_tool, manage_user_session_tool
-tool_node = ToolNode([search_tool, manage_user_session_tool], handle_tool_errors=True)
+tool_node = ToolNode(TOOLS, handle_tool_errors=True)
 builder.add_node("tools", tool_node)
 
 # Set entry point
@@ -514,14 +530,9 @@ def route_pa_output(state: State) -> str:
 
     # Check for explicit next routing
     next_node = state.next
-    if next_node == "features_agent":
-        return "features_agent"
-    elif next_node == "deep_research_agent":
-        return "deep_research_agent"
-    elif next_node == "web_search_agent":
-        return "web_search_agent"
-    elif next_node == "__end__":
-        return "__end__"
+    if next_node:
+        print(f"PA routing to: {next_node}")
+        return next_node
 
     # Default to end
     return "__end__"
@@ -534,6 +545,7 @@ builder.add_conditional_edges(
         "features_agent": "features_agent",
         "deep_research_agent": "deep_research_agent",
         "web_search_agent": "web_search_agent",
+        "personal_assistant_agent": "personal_assistant_agent",
         "__end__": "__end__"
     }
 )
@@ -556,10 +568,10 @@ builder.add_conditional_edges("web_search_agent", route_specialist_output,
                             {"tools": "tools", "personal_assistant_agent": "personal_assistant_agent"})
 
 def route_tools_output(state: State) -> str:
-    """Routes tool output back to the calling agent."""
+    """Routes tool output back to the calling agent or ends for user input."""
     active_agent = state.active_agent
-    print(f"Routing Tools: Active agent is '{active_agent}'")
-
+    print(f"Routing Tools: Active agent is '{active_agent}', session state is '{state.session_state}'")
+    
     # Map state values to node names
     if active_agent == "personal_assistant":
         return "personal_assistant_agent"
@@ -584,7 +596,7 @@ builder.add_conditional_edges(
     }
 )
 
-# Compile with recursion limit
+# Compile with checkpointer
 graph = builder.compile(checkpointer=None)
 
 print("Graph compiled successfully.")
