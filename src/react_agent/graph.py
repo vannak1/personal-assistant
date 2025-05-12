@@ -494,7 +494,9 @@ builder.add_node("deep_research_agent", deep_research_agent)
 builder.add_node("web_search_agent", web_search_agent)
 
 # Create ToolNode with error handling
-tool_node = ToolNode(TOOLS, handle_tool_errors=True)
+# Explicitly list each tool to ensure they are properly registered
+from react_agent.tools import search_tool, manage_user_session_tool
+tool_node = ToolNode([search_tool, manage_user_session_tool], handle_tool_errors=True)
 builder.add_node("tools", tool_node)
 
 # Set entry point

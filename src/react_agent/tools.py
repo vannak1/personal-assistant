@@ -181,4 +181,7 @@ def manage_user_session(user_name_to_set: Optional[str] = None) -> str:
 
 
 # --- Tools Listing ---
-TOOLS: List[Callable[..., Any]] = [search, manage_user_session]
+# Ensure both tools are properly registered and imported by LangGraph
+search_tool = search
+manage_user_session_tool = manage_user_session
+TOOLS: List[Callable[..., Any]] = [search_tool, manage_user_session_tool]
