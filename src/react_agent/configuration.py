@@ -82,7 +82,7 @@ class Configuration:
     )
 
     web_search_model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
-        default="openai/gpt-4o",
+        default="openai/gpt-4.1",
         metadata={
             "description": "The model used for web search operations."
         },
