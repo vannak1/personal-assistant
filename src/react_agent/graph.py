@@ -389,6 +389,62 @@ async def personal_assistant_agent(state: State) -> Dict:
         specialist_results = last_message
         specialist_type = specialist_results.name
 
+        # Special handling for WebSearchAgent results
+        if specialist_type == "WebSearchAgent":
+            # Extract the original query from additional_kwargs or state context
+            original_query = specialist_results.additional_kwargs.get("original_query")
+            if not original_query and "original_query" in state.conversation_context:
+                original_query = state.conversation_context.get("original_query")
+
+            # Check if the response content contains the ORIGINAL_QUERY marker
+            response_content = specialist_results.content
+            if "ORIGINAL_QUERY:" in response_content:
+                parts = response_content.split("ORIGINAL_QUERY:")
+                search_results = parts[0].strip()
+                if len(parts) > 1 and not original_query:
+                    original_query = parts[1].strip()
+            else:
+                search_results = response_content
+
+            if original_query:
+                # Prepare a specialized prompt for processing web search results
+                search_presentation_prompt = f"""
+                The user originally asked: '{original_query}'
+
+                The Web Search Agent found these results:
+                '{search_results}'
+
+                Based on both the original query and the search results, provide a comprehensive answer that:
+                1. Directly addresses the user's question using the search results
+                2. Synthesizes information from multiple sources if available
+                3. Provides a nuanced, thoughtful response that goes beyond summarizing
+                4. Uses a warm, conversational tone appropriate for {current_user_name}
+                5. Cites sources when appropriate
+                6. Addresses any limitations in the search results
+                """
+
+                # Process the search results to generate a comprehensive response
+                response = await model.ainvoke([
+                    {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
+                    {"role": "user", "content": search_presentation_prompt}
+                ])
+
+                result_message = AIMessage(content=response.content, name="PersonalAssistant")
+                result_message.additional_kwargs = {
+                    "status": "presenting_search_results",
+                    "specialist_source": specialist_type,
+                    "original_query": original_query
+                }
+
+                # Reset the active agent back to personal assistant
+                state.active_agent = "personal_assistant"
+
+                return {
+                    "messages": [result_message],
+                    "next": "__end__" # Pause for user input before continuing
+                }
+
+        # Standard handling for other specialist agents
         # Prepare a prompt to present the results
         presentation_prompt = f"""
         The {specialist_type} agent has provided this information:
@@ -591,12 +647,15 @@ async def deep_research_agent(state: State) -> Dict:
 async def web_search_agent(state: State) -> Dict:
     """
     Web search agent that handles search queries and information retrieval.
+
+    When search results are found, the agent will pass the results along with the original
+    query back to the personal assistant for further processing.
     """
     print("--- Running Web Search Agent ---")
     configuration = Configuration.from_context()
     # Use the specific model for this agent
     model = load_chat_model(configuration.deep_research_model).bind_tools(TOOLS)
-    
+
     # Create a custom prompt for web search
     web_search_prompt = """You are a Web Search Agent specializing in finding accurate and current information.
 
@@ -622,43 +681,64 @@ async def web_search_agent(state: State) -> Dict:
 
     Remember that you have access to current information through web search tools, so use them to provide the most up-to-date responses.
 
+    IMPORTANT: When you are done searching, include the original user request in your response prefixed with "ORIGINAL_QUERY:" on a new line at the end of your response. This will help the personal assistant process the results.
+
     System time: {system_time}"""
 
     # Filter messages: Include history, context notes, but exclude general messages
     agent_messages = []
     context_notes = []
-    
+    original_user_request = None
+
     for msg in state.messages:
         # Collect context notes separately
         if getattr(msg, 'name', None) in ['Supervisor_ContextNote', 'PersonalAssistant_ContextNote']:
             context_notes.append(msg)
+            # Extract the original user request from context notes
+            if original_user_request is None and hasattr(msg, 'content'):
+                content = msg.content
+                if isinstance(content, str) and "Request:" in content:
+                    request_line = [line for line in content.split('\n') if "Request:" in line]
+                    if request_line:
+                        original_user_request = request_line[0].replace("Request:", "").strip()
         # Include all user messages, but not PA or Supervisor responses
-        elif isinstance(msg, HumanMessage) or (isinstance(msg, AIMessage) and 
+        elif isinstance(msg, HumanMessage) or (isinstance(msg, AIMessage) and
                                               getattr(msg, 'name', None) not in ['PersonalAssistant', 'Supervisor']):
             agent_messages.append(msg)
-    
+            # If we haven't found a request yet, use the last human message
+            if original_user_request is None and isinstance(msg, HumanMessage):
+                original_user_request = msg.content
+
+    # Store the original query in the state for later use
+    if original_user_request:
+        state.conversation_context["original_query"] = original_user_request
+
     # Add context notes at the beginning for better context
     agent_messages = context_notes + agent_messages
 
     response = cast(
         AIMessage,
         await model.ainvoke(
-            [{"role": "system", "content": web_search_prompt.format(system_time=datetime.now(tz=UTC).isoformat())}, 
-             *agent_messages] 
+            [{"role": "system", "content": web_search_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
+             *agent_messages]
         ),
     )
     response.name = "WebSearchAgent" # Name the response
-    
+
     # Add status information
     response.additional_kwargs = {
         "status": "specialist_active",
-        "specialist": "WebSearchAgent"
+        "specialist": "WebSearchAgent",
     }
+
+    # Add original query to response kwargs
+    if original_user_request:
+        response.additional_kwargs["original_query"] = original_user_request
 
     if not response.tool_calls:
         print("Web Search Agent: Finished (no tool calls).")
         return {
-            "messages": [response], 
+            "messages": [response],
             "next": "supervisor_agent" # Return to supervisor for presentation
         }
     else:
