@@ -653,11 +653,7 @@ builder.add_node("web_search_agent", web_search_agent)
 
 # Create ToolNode with explicit handling of tool responses
 # The ToolNode will execute tools and create corresponding ToolMessages for each tool_call_id
-builder.add_node("tools", ToolNode(
-    TOOLS,
-    # Set to True to properly handle tool execution in async mode consistent with LangChain's patterns
-    async_mode=True
-))
+builder.add_node("tools", ToolNode(TOOLS))
 
 # Entry point is the Personal Assistant
 builder.set_entry_point("personal_assistant_agent")
