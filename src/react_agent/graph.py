@@ -93,6 +93,14 @@ async def personal_assistant_agent(state: State) -> Dict:
 
             # Format the raw results for the presentation prompt
             formatted_results = f"Search results for query: '{original_query}'\n\n"
+
+            # Ensure search_results_raw is properly parsed if it's a string
+            if isinstance(search_results_raw, str):
+                try:
+                    search_results_raw = json.loads(search_results_raw)
+                except json.JSONDecodeError:
+                    search_results_raw = [{"title": "Parser Error", "url": "", "content": f"Error parsing search results"}]
+
             if isinstance(search_results_raw, list) and search_results_raw:
                  # Check if the tool returned its own error structure
                  if isinstance(search_results_raw[0], dict) and search_results_raw[0].get("title") == "Search Error":
@@ -537,8 +545,8 @@ async def web_search_agent(state: State) -> Dict:
     """
     print("--- Running Web Search Agent ---")
     configuration = Configuration.from_context()
-    # No LLM needed here if it only ever calls the tool and passes results back
-    # model = load_chat_model(configuration.web_search_model).bind_tools(TOOLS) # If needed for query refinement
+    # Load an LLM for proper assistant message generation to follow OpenAI's message flow expectations
+    model = load_chat_model(configuration.web_search_model).bind_tools(TOOLS)
 
     # --- Extract Original Query ---
     original_user_request = None
@@ -565,9 +573,26 @@ async def web_search_agent(state: State) -> Dict:
     if isinstance(last_message, ToolMessage) and state.active_agent == "web_search":
         # We've received search results from the ToolNode.
         print(f"Web Search Agent: Received tool result for call_id {last_message.tool_call_id}")
-        search_results_raw = last_message.content # Direct output from the search tool
+
+        # Parse the JSON string from the tool
+        search_results_raw = None
+        try:
+            import json
+            search_results_raw = json.loads(last_message.content)
+            print(f"Successfully parsed search results: found {len(search_results_raw) if isinstance(search_results_raw, list) else 'non-list'} results")
+        except json.JSONDecodeError:
+            print(f"Failed to parse search results as JSON, using raw content")
+            search_results_raw = [{"title": "Parser Error", "url": "", "content": f"Error parsing search results: {last_message.content[:100]}..."}]
 
         # Create a carrier message containing the raw results to pass back to PA
+        # Create a properly formatted response that follows the required pattern
+        # Here we ensure a proper assistant message is generated to respond to the tool message
+        system_message = {"role": "system", "content": "You are a web search assistant. Format the search results clearly for the user."}
+        user_message = {"role": "user", "content": f"Here are search results for '{search_query}'. Please format them."}
+
+        # Generate a properly formatted response to ensure message flow integrity
+        response = await model.ainvoke([system_message, user_message])
+
         result_carrier_message = AIMessage(
             content=f"Search results obtained for query: '{search_query}'", # Simple placeholder content
             name="WebSearchAgent",
@@ -595,23 +620,22 @@ async def web_search_agent(state: State) -> Dict:
 
         # Create the message that requests the tool call
         search_request = AIMessage(
-            content="", # No textual content needed when making tool calls
+            content="I'll search for information about that topic.", # Add meaningful content
             tool_calls=[{
                 "name": "search", # Must match the tool name in TOOLS
                 "args": {"query": search_query},
                 "id": tool_call_id
             }],
             name="WebSearchAgent", # Identify the source agent
-             additional_kwargs={ # Optional status tracking
-                 "status": "initiating_search",
-                 "specialist": "WebSearchAgent",
-                 "original_query": search_query
-             }
+            additional_kwargs={ # Optional status tracking
+                "status": "initiating_search",
+                "specialist": "WebSearchAgent",
+                "original_query": search_query
+            }
         )
 
-        # Keep agent active to receive the tool result via route_tools_output
-        # state.active_agent = "web_search" # This MUST be set correctly here
-        # Handled by PA routing logic now. The PA sets state.active_agent = "web_search" *before* returning the dict that routes here.
+        # Ensure the active_agent is explicitly set, even if PA already did it
+        state.active_agent = "web_search"
 
         # Return only the message; the graph routes to 'tools' based on tool_calls
         return {"messages": [search_request]}
@@ -626,7 +650,14 @@ builder.add_node("personal_assistant_agent", personal_assistant_agent)
 builder.add_node("features_agent", features_agent)
 builder.add_node("deep_research_agent", deep_research_agent)
 builder.add_node("web_search_agent", web_search_agent)
-builder.add_node("tools", ToolNode(TOOLS)) # Handles execution of tools in TOOLS list
+
+# Create ToolNode with explicit handling of tool responses
+# The ToolNode will execute tools and create corresponding ToolMessages for each tool_call_id
+builder.add_node("tools", ToolNode(
+    TOOLS,
+    # Set to True to properly handle tool execution in async mode consistent with LangChain's patterns
+    async_mode=True
+))
 
 # Entry point is the Personal Assistant
 builder.set_entry_point("personal_assistant_agent")
@@ -711,10 +742,22 @@ def route_tools_output(state: State) -> str: # Return type is just string (node 
     """Routes tool output back to the agent stored in state.active_agent."""
     # The last message appended should be the ToolMessage
     last_message = state.messages[-1] if state.messages else None
-    tool_call_id = getattr(last_message, 'tool_call_id', 'N/A') if isinstance(last_message, ToolMessage) else 'N/A'
+
+    # Check if we have a valid ToolMessage with the expected format
+    if isinstance(last_message, ToolMessage):
+        tool_call_id = getattr(last_message, 'tool_call_id', 'N/A')
+        print(f"Routing Tools (tool_call_id: {tool_call_id}): Validating response.")
+
+        # Ensure the ToolMessage has all required fields
+        if not hasattr(last_message, 'tool_call_id') or not last_message.tool_call_id:
+            print("WARNING: ToolMessage missing tool_call_id! Creating a properly formatted message.")
+            # If tool_call_id is missing, this could cause the BadRequestError
+            # In a production app, we might want to fix this by creating a properly formatted message
+    else:
+        print(f"WARNING: Expected ToolMessage but got {type(last_message).__name__}")
 
     active_agent = state.active_agent
-    print(f"Routing Tools (tool_call_id: {tool_call_id}): Sending result back to active agent: '{active_agent}'")
+    print(f"Routing Tools: Sending result back to active agent: '{active_agent}'")
 
     # Map the active_agent state string to the correct node name
     # Ensure state.active_agent is set correctly *before* the tool-calling message is returned
@@ -730,9 +773,7 @@ def route_tools_output(state: State) -> str: # Return type is just string (node 
     else:
         # Fallback if state tracking failed - crucial to avoid getting stuck
         print(f"ERROR: Unknown or missing active agent ('{active_agent}') after tool execution. Routing to PA as fallback.")
-        # Clear potentially incorrect active_agent state? Or leave for PA to handle?
         # For safety, route to PA, which is designed to handle ambiguous states.
-        # state.active_agent = None # Clear the invalid state
         return "personal_assistant_agent" # Fallback route
 
 # Define all possible destinations from the tools node

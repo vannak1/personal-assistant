@@ -48,7 +48,7 @@ class SearchResult:
 
 @tool
 async def search(query: str, include_domains: Optional[str] = None,
-               exclude_domains: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+               exclude_domains: Optional[str] = None) -> str:
     """Search the web for information.
 
     This function performs a web search using the Tavily search engine, which is designed
@@ -61,7 +61,7 @@ async def search(query: str, include_domains: Optional[str] = None,
         exclude_domains: Optional comma-separated list of domains to exclude from search results
 
     Returns:
-        A list of search result objects, each containing title, content, and URL
+        A JSON string containing search results, properly formatted for ToolMessages
     """
     print(f"🔍 Executing search for: '{query}'")
     configuration = Configuration.from_context()
@@ -100,11 +100,17 @@ async def search(query: str, include_domains: Optional[str] = None,
             ]
 
         print(f"✓ Search completed. Found {len(formatted_results)} results.")
-        return formatted_results
+
+        # Return as JSON string, which is compatible with the OpenAI tool message format
+        # This ensures correct handling in the ToolNode -> ToolMessage flow
+        import json
+        return json.dumps(formatted_results)
     except Exception as e:
         print(f"✗ Search error: {str(e)}")
         # Return a formatted error message that will be usable by the web search agent
-        return [{"title": "Search Error", "url": "", "content": f"Error performing search: {str(e)}"}]
+        error_result = [{"title": "Search Error", "url": "", "content": f"Error performing search: {str(e)}"}]
+        import json
+        return json.dumps(error_result)
 
 
 # --- Tools Listing ---
