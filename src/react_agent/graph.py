@@ -681,8 +681,8 @@ builder.add_node("tools", ToolNode(TOOLS))
 # Entry point is now the Personal Assistant
 builder.add_edge("__start__", "personal_assistant_agent")
 
-# Routing from Personal Assistant to specialized agents or end
-def route_pa_output(state: State) -> Literal["features_agent", "deep_research_agent", "web_search_agent", "supervisor_agent", "tools", "__end__"]:
+# Routing from Personal Assistant
+def route_pa_output(state: State) -> Literal["features_agent", "deep_research_agent", "web_search_agent", "supervisor_agent", "tools", "personal_assistant_agent", "__end__"]:
     """Routes PA output to the appropriate specialist agent or ends the conversation turn."""
     last_message = state.messages[-1]
 
@@ -715,44 +715,11 @@ builder.add_conditional_edges(
     "personal_assistant_agent",
     route_pa_output,
     {
+        "tools": "tools",
         "personal_assistant_agent": "personal_assistant_agent",
         "features_agent": "features_agent",
         "deep_research_agent": "deep_research_agent",
         "web_search_agent": "web_search_agent",
-        "supervisor_agent": "supervisor_agent",
-        "tools": "tools",
-        "__end__": "__end__"
-    }
-)
-
-# Routing from Personal Assistant
-def route_pa_output(state: State) -> Literal["tools", "supervisor_agent", "__end__"]:
-    """Routes PA output based on tools, completion, or next destination."""
-    last_message = state.messages[-1]
-    if isinstance(last_message, AIMessage) and last_message.tool_calls:
-        # PA needs to call tools
-        return "tools"
-    
-    # If PA set a specific next field (e.g., for session management)
-    if state.next == "__end__":
-        return "__end__"
-    elif state.next == "supervisor_agent":
-        return "supervisor_agent"
-    
-    # If PA is still in session management
-    if state.session_state in [SESSION_STATE_CHECKING, SESSION_STATE_WAITING_FOR_NAME]:
-        # Stay with PA
-        return "personal_assistant_agent"
-    
-    # Otherwise, back to supervisor
-    return "supervisor_agent"
-
-builder.add_conditional_edges(
-    "personal_assistant_agent",
-    route_pa_output,
-    {
-        "tools": "tools",
-        "personal_assistant_agent": "personal_assistant_agent",
         "supervisor_agent": "supervisor_agent",
         "__end__": "__end__"
     }
