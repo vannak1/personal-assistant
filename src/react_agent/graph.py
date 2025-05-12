@@ -190,23 +190,24 @@ async def personal_assistant_agent(state: State) -> Dict:
     if state.routing_reason == "answering_original_question" and state.original_question:
         print(f"PA: Now answering original question after onboarding: {state.original_question}")
 
-        # Create a prompt to answer the original question
-        direct_prompt = f"""
-        User ({current_user_name}) has just completed onboarding.
-        Their original question was: '{state.original_question}'
+        # Add the original question as a message to the conversation history
+        original_question_message = HumanMessage(content=state.original_question)
 
-        Answer their question in a helpful, conversational tone.
-        """
+        # Then prepare a context message to explain the situation to the model
+        context_message = {"role": "system", "content": f"User ({current_user_name}) has just completed onboarding. Below is their original question that you should now answer in a helpful, conversational tone."}
 
-        response = await model.ainvoke([
+        # Create the model input with proper context
+        messages = [
             {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
-            {"role": "user", "content": direct_prompt}
-        ])
+            context_message,
+            {"role": "user", "content": state.original_question}
+        ]
 
+        response = await model.ainvoke(messages)
         response.name = "PersonalAssistant"
 
         return {
-            "messages": [response],
+            "messages": [original_question_message, response],
             "active_agent": None,
             "routing_reason": None,
             "original_question": None,  # Clear the original question since we've answered it
