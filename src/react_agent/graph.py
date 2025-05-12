@@ -1,7 +1,7 @@
 """Define a hierarchical multi-agent system.
 
-This implements a supervisor agent that routes requests to specialized agent teams:
-1. Personal Assistant Agent: Handles user interaction and simple queries
+This implements a personal assistant agent as the main supervisor that routes requests to specialized agent teams:
+1. Personal Assistant Agent: Handles user interaction, simple queries, and supervises routing
 2. Features Agent: Documents and tracks feature requests
 3. Deep Research Agent: Provides in-depth research on complex topics
 4. Web Search Agent: Handles web searches and information retrieval
@@ -182,18 +182,128 @@ async def supervisor_agent(state: State) -> Dict:
 async def personal_assistant_agent(state: State) -> Dict:
     """
     The personal assistant agent that handles user interaction, simple queries,
-    session management, and result presentation.
+    session management, result presentation, and routing to specialist agents.
+    This agent now acts as the primary supervisor for the system.
     """
     print(f"--- Running Personal Assistant Agent (State: {state.active_agent}) ---")
     configuration = Configuration.from_context()
     model = load_chat_model(configuration.personal_assistant_model).bind_tools(TOOLS)
-    
+
     last_message = state.messages[-1]
     current_user_name = state.user_name
     routing_reason = state.routing_reason or "unknown"
-    
+
     print(f"PA: Received task with routing reason: {routing_reason}")
-    
+
+    # --- Routing Logic for new messages ---
+    # If this is a new human message and we're not in session management, analyze for routing
+    if isinstance(last_message, HumanMessage) and not state.session_state and state.user_name:
+        # Get user request for routing analysis
+        user_request = last_message.content
+        current_user_name = state.user_name or "User"
+
+        # Analyze the request to determine routing
+        routing_prompt = f"""
+        User ({current_user_name}) request: '{user_request}'.
+
+        Based on this request, determine which specialized agent should handle it:
+
+        1. PERSONAL_ASSISTANT: For user interaction, simple questions, direct handling, small talk, capability explanations, or result presentation.
+        2. FEATURES_AGENT: For planning, implementation, project breakdown, feature tracking, or feasibility analysis.
+        3. DEEP_RESEARCH: For in-depth information, complex analysis, or comprehensive research.
+        4. WEB_SEARCH: For current events, fact checking, or search-specific queries.
+
+        Respond ONLY with 'PERSONAL_ASSISTANT', 'FEATURES_AGENT', 'DEEP_RESEARCH', or 'WEB_SEARCH'.
+
+        Before responding, analyze the task:
+        1. Intent Recognition: What is the primary intent?
+        2. Entity Extraction: What key entities are involved?
+        3. Task Decomposition: How can this be broken down?
+        4. Goal Analysis: What is the underlying goal?
+        """
+
+        # Get relevant history for context
+        history = [msg for msg in state.messages if not isinstance(msg, ToolMessage)][-5:]  # Last 5 non-tool messages
+
+        routing_response = await model.ainvoke([
+            {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
+            *history[:-1],  # Previous messages for context
+            {"role": "user", "content": routing_prompt}
+        ])
+
+        routing_decision = routing_response.content.strip().upper()
+        print(f"PA Routing Decision: {routing_decision}")
+
+        # Map the decision to the appropriate agent
+        if "FEATURES_AGENT" in routing_decision:
+            # Prepare context for features agent
+            features_context = f"""
+            User: {current_user_name}
+            Request: {user_request}
+
+            SPECIALIST INSTRUCTIONS:
+            You are receiving this request because it requires feature documentation, planning, or development.
+            Based on our analysis, this request needs detailed implementation planning and tracking.
+            """
+            # Add context note for the specialist
+            state.messages.append(AIMessage(
+                content=features_context,
+                name="PersonalAssistant_ContextNote",
+                additional_kwargs={"is_context": True}
+            ))
+
+            state.routing_reason = "feature_planning_needed"
+            state.active_agent = "features_agent"
+            return {
+                "next": "features_agent"
+            }
+
+        elif "DEEP_RESEARCH" in routing_decision:
+            # Prepare context for deep research
+            research_context = f"""
+            User: {current_user_name}
+            Request: {user_request}
+
+            SPECIALIST INSTRUCTIONS:
+            You are receiving this request because it requires in-depth research or complex information gathering.
+            Based on our analysis, this request needs comprehensive research and explanation.
+            """
+            # Add context note for the specialist
+            state.messages.append(AIMessage(
+                content=research_context,
+                name="PersonalAssistant_ContextNote",
+                additional_kwargs={"is_context": True}
+            ))
+
+            state.routing_reason = "research_needed"
+            state.active_agent = "deep_research"
+            return {
+                "next": "deep_research_agent"
+            }
+
+        elif "WEB_SEARCH" in routing_decision:
+            # Prepare context for web search
+            search_context = f"""
+            User: {current_user_name}
+            Request: {user_request}
+
+            SPECIALIST INSTRUCTIONS:
+            You are receiving this request because it requires web search or current information.
+            Based on our analysis, this request needs up-to-date information from the web.
+            """
+            # Add context note for the specialist
+            state.messages.append(AIMessage(
+                content=search_context,
+                name="PersonalAssistant_ContextNote",
+                additional_kwargs={"is_context": True}
+            ))
+
+            state.routing_reason = "web_search_needed"
+            state.active_agent = "web_search"
+            return {
+                "next": "web_search_agent"
+            }
+
     # --- Session & User Management Logic ---
     
     # A. New user, need to get session information
@@ -239,7 +349,7 @@ async def personal_assistant_agent(state: State) -> Dict:
             greeting_message.additional_kwargs = {"status": "greeting_returning_user"}
             return {
                 "messages": [greeting_message],
-                "next": "supervisor_agent" # Return to supervisor for next action
+                "next": "__end__" # Wait for user input before continuing
             }
         else:
             # New user, ask for name
@@ -273,30 +383,17 @@ async def personal_assistant_agent(state: State) -> Dict:
         }
     
     # --- Specialist Result Presentation Logic ---
-    if routing_reason == "present_results" and state.specialist_results:
-        # Get the specialist results (last AI message that's not from PersonalAssistant)
-        specialist_results = next(
-            (msg for msg in reversed(state.messages) 
-             if isinstance(msg, AIMessage) and msg.name not in ["PersonalAssistant", "Supervisor"]),
-            None
-        )
-        
-        if not specialist_results:
-            # Fallback if we can't find specialist results
-            return {
-                "messages": [AIMessage(
-                    content=f"I've analyzed your request, {current_user_name}. Is there anything specific you'd like me to help with?",
-                    name="PersonalAssistant"
-                )],
-                "next": "supervisor_agent"
-            }
-        
-        # Prepare a prompt to present the results
+    # Check if the last message is from a specialist agent
+    if isinstance(last_message, AIMessage) and last_message.name in ["FeaturesAgent", "DeepResearch", "WebSearchAgent"]:
+        # Specialist has completed its work, process results
+        specialist_results = last_message
         specialist_type = specialist_results.name
+
+        # Prepare a prompt to present the results
         presentation_prompt = f"""
         The {specialist_type} agent has provided this information:
         '{specialist_results.content}'
-        
+
         Present this information back to {current_user_name} in a friendly, conversational way:
         1. Use a warm tone and natural language
         2. Relate the information to their original request
@@ -304,24 +401,24 @@ async def personal_assistant_agent(state: State) -> Dict:
         4. Offer to help with next steps
         5. Apply psychological techniques (mirroring, active listening, positive reinforcement)
         """
-        
+
         response = await model.ainvoke([
             {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
             {"role": "user", "content": presentation_prompt}
         ])
-        
+
         result_message = AIMessage(content=response.content, name="PersonalAssistant")
         result_message.additional_kwargs = {
             "status": "presenting_results",
             "specialist_source": specialist_type
         }
-        
-        # Reset the specialist results flag
-        state.specialist_results = False
-        
+
+        # Reset the active agent back to personal assistant
+        state.active_agent = "personal_assistant"
+
         return {
             "messages": [result_message],
-            "next": "supervisor_agent" # Return to supervisor for next action
+            "next": "__end__" # Pause for user input before continuing
         }
     
     # --- Direct Handling Logic (for simple requests) ---
@@ -335,7 +432,7 @@ async def personal_assistant_agent(state: State) -> Dict:
                 content=f"How can I help you today, {current_user_name or 'there'}?",
                 name="PersonalAssistant"
             )],
-            "next": "supervisor_agent"
+            "next": "__end__" # Wait for user input before continuing
         }
     
     # Direct handling prompt
@@ -362,7 +459,7 @@ async def personal_assistant_agent(state: State) -> Dict:
         # No tools needed, just respond directly
         return {
             "messages": [response],
-            "next": "supervisor_agent" # Return to supervisor for next action
+            "next": "__end__" # Wait for user input before continuing
         }
     else:
         # Tools needed for direct handling
@@ -581,23 +678,50 @@ builder.add_node("deep_research_agent", deep_research_agent)
 builder.add_node("web_search_agent", web_search_agent)
 builder.add_node("tools", ToolNode(TOOLS))
 
-# Entry point is now the Supervisor
-builder.add_edge("__start__", "supervisor_agent")
+# Entry point is now the Personal Assistant
+builder.add_edge("__start__", "personal_assistant_agent")
 
-# Routing from Supervisor to specialized agents
-def route_supervisor_output(state: State) -> Literal["personal_assistant_agent", "features_agent", "deep_research_agent", "web_search_agent"]:
-    """Routes supervisor output to the appropriate agent."""
-    # Use the next field set by supervisor
-    return state.next
+# Routing from Personal Assistant to specialized agents or end
+def route_pa_output(state: State) -> Literal["features_agent", "deep_research_agent", "web_search_agent", "supervisor_agent", "tools", "__end__"]:
+    """Routes PA output to the appropriate specialist agent or ends the conversation turn."""
+    last_message = state.messages[-1]
+
+    # If PA needs to call tools
+    if isinstance(last_message, AIMessage) and last_message.tool_calls:
+        return "tools"
+
+    # If PA wants to explicitly end the turn for user input
+    if state.next == "__end__":
+        return "__end__"
+
+    # If PA is handling session management
+    if state.session_state in [SESSION_STATE_CHECKING, SESSION_STATE_WAITING_FOR_NAME]:
+        return "personal_assistant_agent"
+
+    # If PA wants to route to a specialist agent
+    if state.next == "features_agent":
+        return "features_agent"
+    elif state.next == "deep_research_agent":
+        return "deep_research_agent"
+    elif state.next == "web_search_agent":
+        return "web_search_agent"
+    elif state.next == "supervisor_agent":
+        return "supervisor_agent"
+
+    # Default is to end the turn and wait for user input
+    return "__end__"
 
 builder.add_conditional_edges(
-    "supervisor_agent",
-    route_supervisor_output,
+    "personal_assistant_agent",
+    route_pa_output,
     {
         "personal_assistant_agent": "personal_assistant_agent",
         "features_agent": "features_agent",
         "deep_research_agent": "deep_research_agent",
         "web_search_agent": "web_search_agent",
+        "supervisor_agent": "supervisor_agent",
+        "tools": "tools",
+        "__end__": "__end__"
     }
 )
 
@@ -635,36 +759,32 @@ builder.add_conditional_edges(
 )
 
 # Routing from specialist agents
-def route_specialist_output(state: State) -> Literal["tools", "supervisor_agent"]:
-    """Routes specialist output to tools or back to supervisor."""
+def route_specialist_output(state: State) -> Literal["tools", "personal_assistant_agent"]:
+    """Routes specialist output to tools or back to personal assistant."""
     last_message = state.messages[-1]
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         # Specialist needs tools
         return "tools"
-    
-    # If specialist set a specific next field
-    if state.next == "supervisor_agent":
-        return "supervisor_agent"
-    
-    # Otherwise, back to supervisor for presenting results
-    return "supervisor_agent"
+
+    # Otherwise, back to personal assistant for presenting results
+    return "personal_assistant_agent"
 
 builder.add_conditional_edges(
     "features_agent",
     route_specialist_output,
-    {"tools": "tools", "supervisor_agent": "supervisor_agent"}
+    {"tools": "tools", "personal_assistant_agent": "personal_assistant_agent"}
 )
 
 builder.add_conditional_edges(
     "deep_research_agent",
     route_specialist_output,
-    {"tools": "tools", "supervisor_agent": "supervisor_agent"}
+    {"tools": "tools", "personal_assistant_agent": "personal_assistant_agent"}
 )
 
 builder.add_conditional_edges(
     "web_search_agent",
     route_specialist_output,
-    {"tools": "tools", "supervisor_agent": "supervisor_agent"}
+    {"tools": "tools", "personal_assistant_agent": "personal_assistant_agent"}
 )
 
 # Edge from tools back to the active agent
@@ -672,7 +792,7 @@ def route_tools_output(state: State) -> Literal["personal_assistant_agent", "fea
     """Routes tool output back to the agent that called the tools."""
     active_agent = state.active_agent
     print(f"Tools output: Routing back to active agent: {active_agent}")
-    
+
     if active_agent == "personal_assistant":
         return "personal_assistant_agent"
     elif active_agent == "features_agent":
@@ -682,7 +802,7 @@ def route_tools_output(state: State) -> Literal["personal_assistant_agent", "fea
     elif active_agent == "web_search":
         return "web_search_agent"
     else:
-        # Fallback to PA
+        # Fallback to PA since it's now the supervisor
         print(f"ERROR: Unknown active agent '{active_agent}' after tool execution. Routing to PA.")
         return "personal_assistant_agent"
 
