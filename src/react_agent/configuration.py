@@ -80,6 +80,13 @@ class Configuration:
             "description": "The model used for the deep research agent's information gathering capabilities."
         },
     )
+
+    web_search_model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
+        default="openai/gpt-4o",
+        metadata={
+            "description": "The model used for web search operations."
+        },
+    )
     
     # Model-specific parameters
     supervisor_model_params: Dict[str, Any] = field(
