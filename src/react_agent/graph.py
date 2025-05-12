@@ -2,8 +2,9 @@
 
 This implements a supervisor agent that routes requests to specialized agent teams:
 1. Personal Assistant Agent: Handles user interaction and simple queries
-2. Execution Enforcer Agent: Creates detailed implementation plans
+2. Features Agent: Documents and tracks feature requests
 3. Deep Research Agent: Provides in-depth research on complex topics
+4. Web Search Agent: Handles web searches and information retrieval
 """
 
 from datetime import UTC, datetime
@@ -46,7 +47,7 @@ async def supervisor_agent(state: State) -> Dict:
         }
     
     # If we're receiving results from a specialist agent, route to PA for presentation
-    if isinstance(last_message, AIMessage) and last_message.name in ["ExecutionEnforcer", "DeepResearch"]:
+    if isinstance(last_message, AIMessage) and last_message.name in ["FeaturesAgent", "DeepResearch", "WebSearchAgent"]:
         print(f"Supervisor: Received results from {last_message.name}, routing to PA for presentation")
         # Reset active agent since the specialist is done
         state.active_agent = None
@@ -69,16 +70,23 @@ async def supervisor_agent(state: State) -> Dict:
     # Analyze the request to determine routing
     system_message = configuration.supervisor_prompt.format(system_time=datetime.now(tz=UTC).isoformat())
     routing_prompt = f"""
-User ({current_user_name}) request: '{user_request_message.content}'.
+    User ({current_user_name}) request: '{user_request_message.content}'.
 
-Based on this request, determine which specialized agent should handle it:
+    Based on this request, determine which specialized agent should handle it:
 
-1. PERSONAL_ASSISTANT: For user interaction, simple questions, direct handling, small talk, capability explanations, or result presentation.
-2. EXECUTION_ENFORCER: For planning, implementation, project breakdown, or feasibility analysis.
-3. DEEP_RESEARCH: For in-depth information, complex analysis, or comprehensive research.
+    1. PERSONAL_ASSISTANT: For user interaction, simple questions, direct handling, small talk, capability explanations, or result presentation.
+    2. FEATURES_AGENT: For planning, implementation, project breakdown, feature tracking, or feasibility analysis.
+    3. DEEP_RESEARCH: For in-depth information, complex analysis, or comprehensive research.
+    4. WEB_SEARCH: For current events, fact checking, or search-specific queries.
 
-Respond ONLY with 'PERSONAL_ASSISTANT', 'EXECUTION_ENFORCER', or 'DEEP_RESEARCH'.
-"""
+    Respond ONLY with 'PERSONAL_ASSISTANT', 'FEATURES_AGENT', 'DEEP_RESEARCH', or 'WEB_SEARCH'.
+    
+    Before responding, apply the NLU process to break down the task:
+    1. Intent Recognition: What is the primary intent?
+    2. Entity Extraction: What key entities are involved?
+    3. Task Decomposition: How can this be broken down?
+    4. Goal Analysis: What is the underlying goal?
+    """
     
     # Get relevant history for context
     history = [msg for msg in state.messages if not isinstance(msg, ToolMessage)][-5:]  # Last 5 non-tool messages
@@ -93,39 +101,39 @@ Respond ONLY with 'PERSONAL_ASSISTANT', 'EXECUTION_ENFORCER', or 'DEEP_RESEARCH'
     print(f"Supervisor Routing Decision: {routing_decision}")
     
     # Map the decision to the appropriate agent
-    if "EXECUTION_ENFORCER" in routing_decision:
-        # Prepare context for execution enforcer
-        execution_context = f"""
-User: {current_user_name}
-Request: {user_request_message.content}
-
-SPECIALIST INSTRUCTIONS:
-You are receiving this request because it requires planning, feature development, or turning ideas into actions.
-Based on our analysis, this request needs detailed implementation planning.
-"""
+    if "FEATURES_AGENT" in routing_decision:
+        # Prepare context for features agent
+        features_context = f"""
+        User: {current_user_name}
+        Request: {user_request_message.content}
+        
+        SPECIALIST INSTRUCTIONS:
+        You are receiving this request because it requires feature documentation, planning, or development.
+        Based on our analysis, this request needs detailed implementation planning and tracking.
+        """
         # Add context note for the specialist
         state.messages.append(AIMessage(
-            content=execution_context,
+            content=features_context,
             name="Supervisor_ContextNote",
             additional_kwargs={"is_context": True}
         ))
         
-        state.routing_reason = "planning_needed"
+        state.routing_reason = "feature_planning_needed"
         return {
-            "next": "execution_enforcer_agent", 
-            "active_agent": "execution_enforcer"
+            "next": "features_agent", 
+            "active_agent": "features_agent"
         }
         
     elif "DEEP_RESEARCH" in routing_decision:
         # Prepare context for deep research
         research_context = f"""
-User: {current_user_name}
-Request: {user_request_message.content}
-
-SPECIALIST INSTRUCTIONS:
-You are receiving this request because it requires in-depth research or complex information gathering.
-Based on our analysis, this request needs comprehensive research and explanation.
-"""
+        User: {current_user_name}
+        Request: {user_request_message.content}
+        
+        SPECIALIST INSTRUCTIONS:
+        You are receiving this request because it requires in-depth research or complex information gathering.
+        Based on our analysis, this request needs comprehensive research and explanation.
+        """
         # Add context note for the specialist
         state.messages.append(AIMessage(
             content=research_context,
@@ -137,6 +145,29 @@ Based on our analysis, this request needs comprehensive research and explanation
         return {
             "next": "deep_research_agent", 
             "active_agent": "deep_research"
+        }
+        
+    elif "WEB_SEARCH" in routing_decision:
+        # Prepare context for web search
+        search_context = f"""
+        User: {current_user_name}
+        Request: {user_request_message.content}
+        
+        SPECIALIST INSTRUCTIONS:
+        You are receiving this request because it requires web search or current information.
+        Based on our analysis, this request needs up-to-date information from the web.
+        """
+        # Add context note for the specialist
+        state.messages.append(AIMessage(
+            content=search_context,
+            name="Supervisor_ContextNote",
+            additional_kwargs={"is_context": True}
+        ))
+        
+        state.routing_reason = "web_search_needed"
+        return {
+            "next": "web_search_agent", 
+            "active_agent": "web_search"
         }
         
     else:  # Default to PERSONAL_ASSISTANT
@@ -263,15 +294,16 @@ async def personal_assistant_agent(state: State) -> Dict:
         # Prepare a prompt to present the results
         specialist_type = specialist_results.name
         presentation_prompt = f"""
-The {specialist_type} agent has provided this information:
-'{specialist_results.content}'
-
-Present this information back to {current_user_name} in a friendly, conversational way:
-1. Use a warm tone and natural language
-2. Relate the information to their original request
-3. Ask if this meets their needs or if they need any clarification
-4. Offer to help with next steps
-"""
+        The {specialist_type} agent has provided this information:
+        '{specialist_results.content}'
+        
+        Present this information back to {current_user_name} in a friendly, conversational way:
+        1. Use a warm tone and natural language
+        2. Relate the information to their original request
+        3. Ask if this meets their needs or if they need any clarification
+        4. Offer to help with next steps
+        5. Apply psychological techniques (mirroring, active listening, positive reinforcement)
+        """
         
         response = await model.ainvoke([
             {"role": "system", "content": configuration.personal_assistant_prompt.format(system_time=datetime.now(tz=UTC).isoformat())},
@@ -308,10 +340,11 @@ Present this information back to {current_user_name} in a friendly, conversation
     
     # Direct handling prompt
     direct_prompt = f"""
-User ({current_user_name}): {user_request_message.content}
-
-Handle this request directly in a friendly, conversational manner. You can use tools if needed.
-"""
+    User ({current_user_name}): {user_request_message.content}
+    
+    Handle this request directly in a friendly, conversational manner. You can use tools if needed.
+    Remember to apply psychological techniques to build rapport and understand deeper motivations.
+    """
     
     # Get relevant history for context
     history = [msg for msg in state.messages if not isinstance(msg, ToolMessage)][-5:]  # Last 5 non-tool messages
@@ -339,12 +372,12 @@ Handle this request directly in a friendly, conversational manner. You can use t
         }
 
 
-# Execution Enforcer Agent Implementation
-async def execution_enforcer_agent(state: State) -> Dict:
+# Features Agent Implementation
+async def features_agent(state: State) -> Dict:
     """
-    Execution Enforcer Agent: Turns ideas into actionable plans.
+    Features Agent: Documents and plans feature requests.
     """
-    print("--- Running Execution Enforcer Agent ---")
+    print("--- Running Features Agent ---")
     configuration = Configuration.from_context()
     # Use the specific model for this agent
     model = load_chat_model(configuration.execution_enforcer_model).bind_tools(TOOLS)
@@ -374,16 +407,16 @@ async def execution_enforcer_agent(state: State) -> Dict:
              [{"role": "system", "content": system_message}, *agent_messages] 
         ),
     )
-    response.name = "ExecutionEnforcer" # Name the response
+    response.name = "FeaturesAgent" # Name the response
     
     # Add status information
     response.additional_kwargs = {
         "status": "specialist_active",
-        "specialist": "ExecutionEnforcer"
+        "specialist": "FeaturesAgent"
     }
 
     if not response.tool_calls:
-         print("Execution Enforcer: Finished (no tool calls).")
+         print("Features Agent: Finished (no tool calls).")
          feature_request = {
              "description": response.content,
              "timestamp": datetime.now(tz=UTC).isoformat(),
@@ -397,7 +430,7 @@ async def execution_enforcer_agent(state: State) -> Dict:
              "next": "supervisor_agent" # Return to supervisor for presentation
         }
     else:
-        print("Execution Enforcer: Requesting tools.")
+        print("Features Agent: Requesting tools.")
         # Keep active_agent set, return message with tool calls
         return {"messages": [response]} 
 
@@ -457,21 +490,102 @@ async def deep_research_agent(state: State) -> Dict:
         return {"messages": [response]} 
 
 
+# Web Search Agent Implementation
+async def web_search_agent(state: State) -> Dict:
+    """
+    Web search agent that handles search queries and information retrieval.
+    """
+    print("--- Running Web Search Agent ---")
+    configuration = Configuration.from_context()
+    # Use the specific model for this agent
+    model = load_chat_model(configuration.deep_research_model).bind_tools(TOOLS)
+    
+    # Create a custom prompt for web search
+    web_search_prompt = """You are a Web Search Agent specializing in finding accurate and current information.
+
+    Your primary role is to:
+    1. Formulate effective search queries based on user requests
+    2. Execute web searches to retrieve relevant information
+    3. Process and present search results in a clear, organized format
+    4. Verify information when possible using multiple sources
+    5. Provide direct answers with citations to sources
+
+    When searching:
+    - Use specific, targeted search queries
+    - Filter domains when appropriate for better results
+    - Break complex questions into simpler search queries
+    - Always cite your sources by providing URLs
+    - Indicate when information might be outdated
+
+    Present your findings in a clear, structured format with:
+    - A direct answer to the user's question
+    - Supporting evidence or details
+    - Source citations (URLs)
+    - Any limitations or caveats about the information
+
+    Remember that you have access to current information through web search tools, so use them to provide the most up-to-date responses.
+
+    System time: {system_time}"""
+
+    # Filter messages: Include history, context notes, but exclude general messages
+    agent_messages = []
+    context_notes = []
+    
+    for msg in state.messages:
+        # Collect context notes separately
+        if getattr(msg, 'name', None) in ['Supervisor_ContextNote', 'PersonalAssistant_ContextNote']:
+            context_notes.append(msg)
+        # Include all user messages, but not PA or Supervisor responses
+        elif isinstance(msg, HumanMessage) or (isinstance(msg, AIMessage) and 
+                                              getattr(msg, 'name', None) not in ['PersonalAssistant', 'Supervisor']):
+            agent_messages.append(msg)
+    
+    # Add context notes at the beginning for better context
+    agent_messages = context_notes + agent_messages
+
+    response = cast(
+        AIMessage,
+        await model.ainvoke(
+            [{"role": "system", "content": web_search_prompt.format(system_time=datetime.now(tz=UTC).isoformat())}, 
+             *agent_messages] 
+        ),
+    )
+    response.name = "WebSearchAgent" # Name the response
+    
+    # Add status information
+    response.additional_kwargs = {
+        "status": "specialist_active",
+        "specialist": "WebSearchAgent"
+    }
+
+    if not response.tool_calls:
+        print("Web Search Agent: Finished (no tool calls).")
+        return {
+            "messages": [response], 
+            "next": "supervisor_agent" # Return to supervisor for presentation
+        }
+    else:
+        print("Web Search Agent: Requesting tools.")
+        # Keep active_agent set, return message with tool calls
+        return {"messages": [response]} 
+
+
 # Build the hierarchical multi-agent graph
 builder = StateGraph(State, input=InputState, config_schema=Configuration)
 
 # Add the nodes
 builder.add_node("supervisor_agent", supervisor_agent)
 builder.add_node("personal_assistant_agent", personal_assistant_agent)
-builder.add_node("execution_enforcer_agent", execution_enforcer_agent)
+builder.add_node("features_agent", features_agent)
 builder.add_node("deep_research_agent", deep_research_agent)
+builder.add_node("web_search_agent", web_search_agent)
 builder.add_node("tools", ToolNode(TOOLS))
 
 # Entry point is now the Supervisor
 builder.add_edge("__start__", "supervisor_agent")
 
 # Routing from Supervisor to specialized agents
-def route_supervisor_output(state: State) -> Literal["personal_assistant_agent", "execution_enforcer_agent", "deep_research_agent"]:
+def route_supervisor_output(state: State) -> Literal["personal_assistant_agent", "features_agent", "deep_research_agent", "web_search_agent"]:
     """Routes supervisor output to the appropriate agent."""
     # Use the next field set by supervisor
     return state.next
@@ -481,8 +595,9 @@ builder.add_conditional_edges(
     route_supervisor_output,
     {
         "personal_assistant_agent": "personal_assistant_agent",
-        "execution_enforcer_agent": "execution_enforcer_agent",
+        "features_agent": "features_agent",
         "deep_research_agent": "deep_research_agent",
+        "web_search_agent": "web_search_agent",
     }
 )
 
@@ -535,7 +650,7 @@ def route_specialist_output(state: State) -> Literal["tools", "supervisor_agent"
     return "supervisor_agent"
 
 builder.add_conditional_edges(
-    "execution_enforcer_agent",
+    "features_agent",
     route_specialist_output,
     {"tools": "tools", "supervisor_agent": "supervisor_agent"}
 )
@@ -546,18 +661,26 @@ builder.add_conditional_edges(
     {"tools": "tools", "supervisor_agent": "supervisor_agent"}
 )
 
+builder.add_conditional_edges(
+    "web_search_agent",
+    route_specialist_output,
+    {"tools": "tools", "supervisor_agent": "supervisor_agent"}
+)
+
 # Edge from tools back to the active agent
-def route_tools_output(state: State) -> Literal["personal_assistant_agent", "execution_enforcer_agent", "deep_research_agent"]:
+def route_tools_output(state: State) -> Literal["personal_assistant_agent", "features_agent", "deep_research_agent", "web_search_agent"]:
     """Routes tool output back to the agent that called the tools."""
     active_agent = state.active_agent
     print(f"Tools output: Routing back to active agent: {active_agent}")
     
     if active_agent == "personal_assistant":
         return "personal_assistant_agent"
-    elif active_agent == "execution_enforcer":
-        return "execution_enforcer_agent"
+    elif active_agent == "features_agent":
+        return "features_agent"
     elif active_agent == "deep_research":
         return "deep_research_agent"
+    elif active_agent == "web_search":
+        return "web_search_agent"
     else:
         # Fallback to PA
         print(f"ERROR: Unknown active agent '{active_agent}' after tool execution. Routing to PA.")
@@ -568,10 +691,11 @@ builder.add_conditional_edges(
     route_tools_output,
     {
         "personal_assistant_agent": "personal_assistant_agent",
-        "execution_enforcer_agent": "execution_enforcer_agent",
+        "features_agent": "features_agent",
         "deep_research_agent": "deep_research_agent",
+        "web_search_agent": "web_search_agent",
     }
 )
 
 # Compile the graph
-graph = builder.compile(name="Kaizen Multi-Agent System")
+graph = builder.compile(name="Multi-Agent Personal Assistant")
