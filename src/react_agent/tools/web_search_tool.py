@@ -4,7 +4,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from langchain_core.tools import tool
-from langchain_community.tools.tavily_search.tool import TavilySearchResults
+from langchain_tavily import TavilySearch
 
 from react_agent.configuration import Configuration
 
@@ -44,7 +44,7 @@ class WebSearchTool:
     def __init__(self, max_results: int = 5):
         """Initialize the web search tool."""
         self.max_results = max_results
-        self._search_client = TavilySearchResults(max_results=max_results)
+        self._search_client = TavilySearch(max_results=max_results)
         
     async def search(self, query: str, include_domains: Optional[List[str]] = None, 
                     exclude_domains: Optional[List[str]] = None) -> List[SearchResult]:
@@ -69,9 +69,8 @@ class WebSearchTool:
                 search_kwargs["exclude_domains"] = exclude_domains
                 
             # Execute search
-            query = search_kwargs.pop("query")
-            results = await self._search_client.ainvoke(query, **search_kwargs)
-
+            results = await self._search_client.ainvoke(search_kwargs)
+            
             # Process results
             search_results = []
             for result in results:
