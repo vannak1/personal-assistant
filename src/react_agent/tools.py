@@ -1,6 +1,6 @@
 """This module provides tools for web scraping and search functionality.
 
-It includes enhanced Tavily search functions with domain filtering and formatted results.
+It includes enhanced Tavily search functions for web search capabilities.
 
 These tools are designed to support the web search agent and other components
 that require web search capabilities.
@@ -11,7 +11,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, TypedDict, cast
 
 from langchain_core.tools import tool
-from langchain_tavily import TavilySearch  # type: ignore[import-not-found]
+from langchain_tavily import TavilySearch
 
 from react_agent.configuration import Configuration
 
@@ -47,78 +47,43 @@ class SearchResult:
 
 
 @tool
-async def search(query: str) -> Optional[dict[str, Any]]:
-    """Search for general web results.
+async def search(query: str, include_domains: Optional[str] = None,
+               exclude_domains: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """Search the web for information.
 
-    This function performs a search using the Tavily search engine, which is designed
-    to provide comprehensive, accurate, and trusted results. It's particularly useful
-    for answering questions about current events.
+    This function performs a web search using the Tavily search engine, which is designed
+    to provide comprehensive, accurate, and trusted results from the internet. It's particularly 
+    useful for answering questions about current events, facts, and finding relevant web content.
 
     Args:
         query: The search query to execute
+        include_domains: Optional comma-separated list of domains to limit search results to
+        exclude_domains: Optional comma-separated list of domains to exclude from search results
 
     Returns:
         Raw search results from Tavily
     """
     configuration = Configuration.from_context()
-    wrapped = TavilySearch(max_results=configuration.max_search_results)
-    return cast(dict[str, Any], await wrapped.ainvoke({"query": query}))
-
-
-@tool
-async def web_search(query: str, include_domains: Optional[str] = None,
-                   exclude_domains: Optional[str] = None) -> str:
-    """
-    Search the web for information on a specific query with domain filtering options.
-
-    Args:
-        query: The search query to use
-        include_domains: Optional comma-separated list of domains to limit search results to
-        exclude_domains: Optional comma-separated list of domains to exclude from search results
-
-    Returns:
-        Formatted search results as text
-    """
-    try:
-        # Process domain lists if provided
-        include_list = include_domains.split(",") if include_domains else None
-        exclude_list = exclude_domains.split(",") if exclude_domains else None
-
-        # Prepare search parameters
-        configuration = Configuration.from_context()
-        search_client = TavilySearch(max_results=configuration.max_search_results)
-
-        # Construct search arguments
-        search_kwargs = {"query": query}
-        if include_list:
-            search_kwargs["include_domains"] = include_list
-        if exclude_list:
-            search_kwargs["exclude_domains"] = exclude_list
-
-        # Execute search
-        results = await search_client.ainvoke(search_kwargs)
-
-        # Format results
-        if not results:
-            return "No search results found for your query."
-
-        formatted_results = f"Search results for: {query}\n\n"
-
-        for i, result in enumerate(results, 1):
-            title = result.get("title", "Untitled")
-            url = result.get("url", "")
-            content = result.get("content", "")
-
-            formatted_results += f"{i}. {title}\n"
-            formatted_results += f"   URL: {url}\n"
-            formatted_results += f"   {content[:200]}...\n\n"
-
-        return formatted_results
-
-    except Exception as e:
-        logger.error(f"Error during web search: {str(e)}")
-        return f"Error performing search: {str(e)}"
+    
+    # Process domain lists if provided
+    include_list = include_domains.split(",") if include_domains else None
+    exclude_list = exclude_domains.split(",") if exclude_domains else None
+    
+    # Initialize the search client with configuration
+    search_client = TavilySearch(
+        max_results=configuration.max_search_results,
+        topic="general",
+    )
+    
+    # Construct search arguments
+    search_kwargs = {"query": query}
+    if include_list:
+        search_kwargs["include_domains"] = include_list
+    if exclude_list:
+        search_kwargs["exclude_domains"] = exclude_list
+        
+    return await search_client.ainvoke(search_kwargs)
 
 
 # --- Tools Listing ---
-TOOLS: List[Callable[..., Any]] = [search, web_search]
+TOOLS: List[Callable[..., Any]] = [search]

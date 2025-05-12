@@ -723,13 +723,28 @@ async def web_search_agent(state: State) -> Dict:
     # Add this message to the state but don't return it yet
     state.messages.append(acknowledgment_message)
 
-    # Now perform the actual search internally using the web_search tool
-    from react_agent.tools import web_search
+    # Now perform the actual search internally using the search tool
+    from react_agent.tools import search
     search_query = original_user_request if original_user_request else "unknown query"
 
     try:
         # Execute the search directly without exposing tool calls
-        search_results = await web_search(query=search_query)
+        search_results_raw = await search(query=search_query)
+
+        # Format the search results into a readable format
+        search_results = "Search results for: " + search_query + "\n\n"
+
+        if search_results_raw:
+            for i, result in enumerate(search_results_raw, 1):
+                title = result.get("title", "Untitled")
+                url = result.get("url", "")
+                content = result.get("content", "")
+
+                search_results += f"{i}. {title}\n"
+                search_results += f"   URL: {url}\n"
+                search_results += f"   {content[:200]}...\n\n"
+        else:
+            search_results = "No search results found for your query."
 
         # Add context notes at the beginning for better context
         agent_messages = context_notes + agent_messages
