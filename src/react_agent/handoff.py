@@ -4,7 +4,7 @@ This module provides tools and functions for transferring control between
 different specialized agents with appropriate context extraction.
 """
 
-from __future__ import annotations
+from __future_ import annotations
 
 from typing import Annotated, Dict, Any, List, Optional
 from datetime import datetime
@@ -14,8 +14,9 @@ import json
 
 from langchain_core.tools import tool, BaseTool
 from langchain_core.messages import ToolMessage, HumanMessage, BaseMessage
-from langgraph.prebuilt import InjectedState, InjectedToolCallId
-from langgraph.types import Command
+from langgraph.prebuilt import InjectedState
+# InjectedToolCallId was removed or moved; using tool_call_id: str as per LangGraph updates
+from langgraph.types import Command # Ensure Command is imported if not already
 
 from react_agent.memory import TaskContext, UserProfile, SessionContext
 
@@ -38,14 +39,14 @@ def create_handoff_tool(agent_name: str, description: Optional[str] = None) -> B
     def handoff_to_agent(
         task_description: str,
         state: Annotated[Dict[str, Any], InjectedState],
-        tool_call_id: Annotated[str, InjectedToolCallId],
+        tool_call_id: str,  # Using regular string as InjectedToolCallId is not available
     ):
         """Transfer the current task to another agent with relevant context.
         
         Args:
             task_description: Description of the task to transfer
             state: Current state (injected)
-            tool_call_id: Tool call ID (injected)
+            tool_call_id: Tool call ID
             
         Returns:
             Command object to specify next node and update state
