@@ -8,6 +8,10 @@ and routes requests to specialized agent teams when necessary:
 2. Features Agent: Documents and tracks feature requests.
 3. Deep Research Agent: Provides in-depth research on complex topics.
 4. Web Search Agent: Handles web searches and information retrieval via tools.
+
+Note: This file is now primarily for backwards compatibility.
+For the enhanced implementation with differentiated memory, handoff mechanisms, 
+and optimized tool calling, see the supervisor.py, memory.py, and related files.
 """
 
 from datetime import UTC, datetime
@@ -25,6 +29,13 @@ from react_agent.configuration import Configuration
 from react_agent.state import State, InputState
 from react_agent.tools import TOOLS
 from react_agent.utils import load_chat_model
+
+# Import new components for enhanced functionality
+from react_agent.memory import PrimaryAgentMemory, SpecializedAgentMemory, create_memory_for_agent
+from react_agent.supervisor import create_supervisor_system
+from react_agent.memory_manager import MemoryManager
+from react_agent.tool_registry import TOOL_REGISTRY
+from react_agent.human_loop import add_human_in_the_loop, get_default_approval_configuration
 
 # Define specific session states (constants)
 SESSION_STATE_CHECKING = "session_checking"
@@ -679,3 +690,10 @@ builder.add_conditional_edges(
 graph = builder.compile(checkpointer=None)
 
 print("Graph compiled successfully.")
+
+# --- New Enhanced Implementation ---
+
+def create_enhanced_graph(with_human_in_loop: bool = True):
+    """Create enhanced graph using new implementation."""
+    from react_agent.main import create_personal_assistant
+    return create_personal_assistant(with_human_in_loop=with_human_in_loop)

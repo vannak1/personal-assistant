@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from typing import Annotated, Dict, Any
+from typing import Annotated, Dict, Any, List, Optional
 
 from langchain_core.runnables import ensure_config
 from langgraph.config import get_config
@@ -107,6 +107,48 @@ class Configuration:
         default_factory=lambda: {"temperature": 0.2, "max_tokens": 2048},  # Lower temperature for analytical precision
         metadata={
             "description": "Parameters for the specialist models to optimize analytical capabilities."
+        },
+    )
+    
+    # Memory management settings
+    memory_ttl_primary: int = field(
+        default=30 * 24 * 3600,  # 30 days
+        metadata={
+            "description": "Time-to-live in seconds for primary agent memory (router and PA)."
+        },
+    )
+    
+    memory_ttl_research: int = field(
+        default=7 * 24 * 3600,  # 7 days
+        metadata={
+            "description": "Time-to-live in seconds for research agent memory."
+        },
+    )
+    
+    memory_ttl_specialized: int = field(
+        default=1 * 24 * 3600,  # 1 day
+        metadata={
+            "description": "Time-to-live in seconds for specialized agent memory (website, feature request)."
+        },
+    )
+    
+    # New human-in-the-loop settings
+    human_in_the_loop: bool = field(
+        default=True,
+        metadata={
+            "description": "Whether to enable human-in-the-loop capabilities."
+        },
+    )
+    
+    human_approval_required_for: Dict[str, List[str]] = field(
+        default_factory=lambda: {
+            "personal_assistant": ["manage_user_session"],
+            "research": ["search"],
+            "website": ["search"],
+            "feature_request": ["search"]
+        },
+        metadata={
+            "description": "Map of agent types to tools that require human approval."
         },
     )
     
