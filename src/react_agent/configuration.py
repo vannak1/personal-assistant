@@ -61,7 +61,7 @@ class Configuration:
     )
     
     personal_assistant_model: Annotated[str, {"__template_metadata__": {"kind": "llm"}}] = field(
-        default="openai/gpt-4o",
+        default="openai/o4",
         metadata={
             "description": "The model used for the personal assistant agent's user interactions."
         },

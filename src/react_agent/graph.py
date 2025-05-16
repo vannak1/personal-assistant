@@ -73,18 +73,7 @@ __all__ = [
     "create_enhanced_graph",
     "memory_manager" # Optionally expose memory_manager
 ]
-```**Key changes in `graph.py`**:
-*   Removed the old agent definitions (`personal_assistant_agent`, `features_agent`, etc.) and the old `StateGraph` builder logic.
-*   Now, it directly calls `create_personal_assistant` (from `react_agent.main`) to get the new `supervisor_system` and assigns it to the `graph` variable.
-*   It includes placeholders for you to insert your actual checkpointer (and store, if applicable), especially if you are using PostgreSQL as hinted by your original error log. Using `InMemorySaver` is a default/fallback.
-*   It explicitly lists exports like `State`, `InputState`, `Configuration`, and `TOOLS` as they might be expected by the system loading the graph.
 
-**3. Adjust `__init__.py` (Optional but Recommended)**
-
-Your `react_agent/__init__.py` imports several things from `graph.py`. Since `graph.py` has changed significantly, you should update these imports.
-
-**File: `react_agent/__init__.py` (Suggestion for update)**
-```python
 """React Agent multi-agent personal assistant system.
 
 This module defines a custom reasoning and action agent graph.
